@@ -7149,6 +7149,24 @@ textarea {
 .label[data-format*=turtle] {
   background-color: #0b4498;
 }
+.format-label[data-format=jpg],
+.format-label[data-format*=jpg],
+.format-label[data-format=jpeg],
+.format-label[data-format*=jpeg],
+.format-label[data-format=png],
+.format-label[data-format*=png],
+.format-label[data-format=bmp],
+.format-label[data-format*=bmp],
+.format-label[data-format=tiff],
+.format-label[data-format*=tiff],
+.format-label[data-format=gif],
+.format-label[data-format*=gif],
+.format-label[data-format=image],
+.format-label[data-format*=image],
+.format-label[data-format=img],
+.format-label[data-format*=img] {
+  background-color: #8b5700;
+}
 .view-list {
   margin: 0;
   list-style: none;
