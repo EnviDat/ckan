@@ -3,6 +3,7 @@ import cgi
 import pylons
 import datetime
 import logging
+import mimetypes
 
 import ckan.lib.munge as munge
 import ckan.logic as logic
@@ -180,6 +181,8 @@ class Upload(object):
 class ResourceUpload(object):
     def __init__(self, resource):
         path = get_storage_path()
+        config_mimetype_guess = config.get('ckan.mimetype_guess', 'file_ext')
+        
         if not path:
             self.storage_path = None
             return
@@ -191,10 +194,14 @@ class ResourceUpload(object):
             if e.errno != 17:
                 raise
         self.filename = None
+        self.mimetype = None
 
         url = resource.get('url')
         upload_field_storage = resource.pop('upload', None)
         self.clear = resource.pop('clear_upload', None)
+
+        if config_mimetype_guess == 'file_ext':
+            self.mimetype = mimetypes.guess_type(url)[0]
 
         if isinstance(upload_field_storage, cgi.FieldStorage):
             self.filesize = 0 # bytes
