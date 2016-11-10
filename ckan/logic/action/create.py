@@ -303,6 +303,9 @@ def resource_create(context, data_dict):
     if 'size' not in data_dict:
         if hasattr(upload, 'filesize'):
             data_dict['size'] = upload.filesize
+    print("** UPLOAD ***")
+    print(upload)
+    print (data_dict)
     
     pkg_dict['resources'].append(data_dict)
 
