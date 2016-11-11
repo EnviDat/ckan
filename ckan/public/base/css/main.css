@@ -7169,6 +7169,15 @@ textarea {
 .label[data-format*=img] {
   background-color: #8b5700;
 }
+.label[data-format=doc],
+.label[data-format*=doc],
+.label[data-format=docx],
+.label[data-format*=docx],
+.label[data-format=word],
+.label[data-format*=word] {
+  background-color: #2f85d9;
+}
+
 .view-list {
   margin: 0;
   list-style: none;
