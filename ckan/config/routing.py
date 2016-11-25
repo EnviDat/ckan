@@ -231,7 +231,7 @@ def make_map():
                   action='followers', ckan_icon='group')
         m.connect('dataset_activity', '/dataset/activity/{id}',
                   action='activity', ckan_icon='time')
-        m.connect('/dataset/activity/{id}/{offset}', action='activity')
+        m.connect('/dataset/activity/{id}/{offset:\d}', action='activity')
         m.connect('dataset_groups', '/dataset/groups/{id}',
                   action='groups', ckan_icon='group')
         m.connect('dataset_resources', '/dataset/resources/{id}',
@@ -298,7 +298,7 @@ def make_map():
                   ckan_icon='edit')
         m.connect('group_members', '/group/members/{id}', action='members',
                   ckan_icon='group'),
-        m.connect('group_activity', '/group/activity/{id}/{offset}',
+        m.connect('group_activity', '/group/activity/{id}/{offset:\d}',
                   action='activity', ckan_icon='time'),
         m.connect('group_read', '/group/{id}', action='read',
                   ckan_icon='sitemap')
@@ -316,7 +316,7 @@ def make_map():
                       'member_delete',
                       'history'
                   ])))
-        m.connect('organization_activity', '/organization/activity/{id}/{offset}',
+        m.connect('organization_activity', '/organization/activity/{id}/{offset:\d}',
                   action='activity', ckan_icon='time')
         m.connect('organization_read', '/organization/{id}', action='read')
         m.connect('organization_about', '/organization/about/{id}',
@@ -348,7 +348,7 @@ def make_map():
         # Note: openid users have slashes in their ids, so need the wildcard
         # in the route.
         m.connect('user_generate_apikey', '/user/generate_key/{id}', action='generate_apikey')
-        m.connect('/user/activity/{id}/{offset}', action='activity')
+        m.connect('/user/activity/{id}/{offset:\d}', action='activity')
         m.connect('user_activity_stream', '/user/activity/{id}',
                   action='activity', ckan_icon='time')
         m.connect('user_dashboard', '/dashboard', action='dashboard',
@@ -359,7 +359,7 @@ def make_map():
                   action='dashboard_groups', ckan_icon='group')
         m.connect('user_dashboard_organizations', '/dashboard/organizations',
                   action='dashboard_organizations', ckan_icon='building')
-        m.connect('/dashboard/{offset}', action='dashboard')
+        m.connect('/dashboard/{offset:\d}', action='dashboard')
         m.connect('user_follow', '/user/follow/{id}', action='follow')
         m.connect('/user/unfollow/{id}', action='unfollow')
         m.connect('user_followers', '/user/followers/{id:.*}',
