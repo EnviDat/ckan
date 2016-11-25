@@ -190,7 +190,7 @@ def register_group_plugins(map):
                         action='members',
                         ckan_icon='group')
             map.connect('%s_activity' % group_type,
-                        '/%s/activity/{id}/{offset}' % group_type,
+                        '/%s/activity/{id}/{offset:\d*}' % group_type,
                         controller=group_controller,
                         action='activity', ckan_icon='time'),
 
