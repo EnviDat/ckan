@@ -1,8 +1,9 @@
-# -*- coding: utf-8 -*-
+# encoding: utf-8
+
 import datetime
 from nose.tools import assert_equal, assert_raises
 
-from pylons import config
+from ckan.common import config
 
 from ckan.tests.legacy import *
 import ckan.lib.helpers as h
@@ -37,6 +38,20 @@ class TestHelpers(TestController):
     def test_render_datetime_blank(self):
         res = h.render_datetime(None)
         assert_equal(res, '')
+
+    def test_render_datetime_year_before_1900(self):
+        res = h.render_datetime('1875-04-13T20:40:20.123456', date_format='%Y')
+        assert_equal(res, '1875')
+
+        res = h.render_datetime('1875-04-13T20:40:20.123456', date_format='%y')
+        assert_equal(res, '75')
+
+    def test_render_datetime_year_before_1900_escape_percent(self):
+        res = h.render_datetime('1875-04-13', date_format='%%%y')
+        assert_equal(res, '%75')
+
+        res = h.render_datetime('1875-04-13', date_format='%%%Y')
+        assert_equal(res, '%1875')
 
     def test_datetime_to_date_str(self):
         res = datetime.datetime(2008, 4, 13, 20, 40, 20, 123456).isoformat()
@@ -180,3 +195,5 @@ class TestHelpers(TestController):
         assert_equal(h.get_pkg_dict_extra(pkg_dict, 'extra_not_found'), None)
 
         assert_equal(h.get_pkg_dict_extra(pkg_dict, 'extra_not_found', 'default_value'), 'default_value')
+
+        model.repo.rebuild_db()

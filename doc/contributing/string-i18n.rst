@@ -38,6 +38,8 @@ string internationalization when reviewing a pull request.
    existing code.
 
 
+.. _jinja_i18n:
+
 ------------------------------------------------
 Internationalizating strings in Jinja2 templates
 ------------------------------------------------
@@ -191,12 +193,90 @@ To handle different plural and singular forms of a string, use ``ungettext()``:
        num_objects).format(count=count, name=name)
 
 
+.. _javascript_i18n:
+
 ---------------------------------------------
 Internationalizing strings in JavaScript code
 ---------------------------------------------
 
-.. todo::
+Each :ref:`CKAN JavaScript module <javascript_modules>` offers the methods
+``_`` and ``ngettext`` for translating singular and plural strings,
+respectively:
 
+.. code-block:: javascript
+
+    this.ckan.module('i18n-demo', function($) {
+        return {
+            initialize: function () {
+                console.log(this._('Translate me!'));
+                console.log(this.ngettext('%(num)d item', '%(num)d items', 3));
+            }
+        };
+    };
+
+To translate a fixed singular string, use ``_``. It returns the translation of
+the string for the currently selected locale. If the current locale doesn't
+provide a translation for the string then it is returned unchanged.
+
+.. code-block:: javascript
+
+    this._('Something that should be translated')
+
+Placeholders are supported via `sprintf-syntax`_, the corresponding values are
+passed via another parameter:
+
+.. _sprintf-syntax: http://www.diveintojavascript.com/projects/javascript-sprintf
+
+.. code-block:: javascript
+
+    this._("My name is %(name)s and I'm from %(hometown)s.",
+           {name: 'Sarah', hometown: 'Cape Town'})
+
+``ngettext`` allows you to translate a string that may be either singular or
+plural, depending on some variable:
+
+.. code-block:: javascript
+
+    this.ngettext('Deleted %(num)d item',
+                  'Deleted %(num)d items',
+                  items.length)
+
+If ``items.length`` is 1 then the translation for the first argument will be
+returned, otherwise that of the second argument. ``num`` is a magical
+placeholder that is automatically provided by ``ngettext`` and contains the
+value of the third parameter.
+
+Like ``_``, ``ngettext`` can take additional placeholders:
+
+.. code-block:: javascript
+
+    this.ngettext("I'm %(name)s and I'm %(num)d year old",
+                  "I'm %(name)s and I'm %(num)d years old",
+                  age,
+                  {name: 'John'})
+
+
+.. note::
+
+    CKAN's JavaScript code automatically downloads the appropriate translations
+    at request time from the CKAN server. Since CKAN 2.7 the corresponding
+    translation files are regenerated automatically if necessary when CKAN
+    starts.
+
+    You can also regenerate the translation files manually using ``paster trans
+    js``::
+
+        python setup.py extract_messages  # Extract translatable strings
+        # Update .po files as desired
+        python setup.py compile_catalog   # Compile .mo files for Python/Jinja
+        paster trans js                   # Compile JavaScript catalogs
+
+
+.. note::
+
+    Prior to CKAN 2.7, JavaScript modules received a similar but different
+    ``_`` function for string translation as a parameter. This is still
+    supported but deprecated and will be removed in a future release.
 
 -------------------------------------------------
 General guidelines for internationalizing strings
@@ -359,20 +439,22 @@ the quality of CKAN's translations:
      {# TRANSLATORS: This heading is displayed on the user's profile page. #}
      <h1>{% trans %}Heading{% endtrans %}</h1>
 
+  In JavaScript:
+
+  .. code-block:: javascript
+
+      // TRANSLATORS: "Manual" refers to the user manual
+      _("Manual")
+
   These comments end up in the ``ckan.pot`` file and translators will see them
   when they're translating the strings (Transifex shows them, for example).
 
   .. note::
 
-     In both Python and Jinja2, the comment must be on the line before the line
-     with the ``_()``, ``ungettext()`` or ``{% trans %}``, and must start with
-     the exact string ``TRANSLATORS:`` (in upper-case and with the colon).
-     This string is configured in ``setup.cfg``.
-
-  .. todo::
-
-     Example of leaving a translator comment in JavaScript.
-     Probably ``// TRANSLATORS: This is a helpful comment`` will work.
+     The comment must be on the line before the line with the ``_()``,
+     ``ungettext()`` or ``{% trans %}``, and must start with the exact string
+     ``TRANSLATORS:`` (in upper-case and with the colon). This string is
+     configured in ``setup.cfg``.
 
 .. todo::
 

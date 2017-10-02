@@ -1,6 +1,9 @@
+# encoding: utf-8
+
 import datetime
 
 from nose.tools import eq_
+import mock
 
 import ckan.plugins as p
 from ckan.tests import helpers, factories
@@ -30,7 +33,7 @@ class TestDataPusherAction(object):
             'entity_id': resource_id,
             'entity_type': 'resource',
             'task_type': 'datapusher',
-            'last_updated': str(datetime.datetime.now()),
+            'last_updated': str(datetime.datetime.utcnow()),
             'state': 'pending',
             'key': 'datapusher',
             'value': '{}',
@@ -163,13 +166,14 @@ class TestDataPusherAction(object):
                                    **self._pending_task(resource['id']))
 
         # Update the resource, set a new last_modified (changes on file upload)
-        helpers.call_action('resource_update', {},
-                            id=resource['id'],
-                            package_id=dataset['id'],
-                            url='http://example.com/file.csv',
-                            format='CSV',
-                            last_modified=datetime.datetime.now().isoformat()
-                            )
+        helpers.call_action(
+            'resource_update', {},
+            id=resource['id'],
+            package_id=dataset['id'],
+            url='http://example.com/file.csv',
+            format='CSV',
+            last_modified=datetime.datetime.utcnow().isoformat()
+        )
         # Not called
         eq_(len(mock_datapusher_submit.mock_calls), 1)
 
@@ -275,3 +279,20 @@ class TestDataPusherAction(object):
 
         # Not called
         eq_(len(mock_datapusher_submit.mock_calls), 1)
+
+    def test_duplicated_tasks(self):
+        def submit(res, user):
+            return helpers.call_action(
+                'datapusher_submit', context=dict(user=user['name']),
+                resource_id=res['id'])
+
+        user = factories.User()
+        res = factories.Resource(user=user)
+        with mock.patch('requests.post') as r_mock:
+            r_mock().json = mock.Mock(
+                side_effect=lambda: dict.fromkeys(
+                    ['job_id', 'job_key']))
+            r_mock.reset_mock()
+            submit(res, user)
+            submit(res, user)
+            eq_(1, r_mock.call_count)

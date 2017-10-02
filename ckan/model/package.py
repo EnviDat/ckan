@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import datetime
 from calendar import timegm
 import logging
@@ -6,7 +8,7 @@ logger = logging.getLogger(__name__)
 from sqlalchemy.sql import select, and_, union, or_
 from sqlalchemy import orm
 from sqlalchemy import types, Column, Table
-from pylons import config
+from ckan.common import config
 import vdm.sqlalchemy
 
 import meta
@@ -47,6 +49,7 @@ package_table = Table('package', meta.metadata,
         Column('type', types.UnicodeText, default=u'dataset'),
         Column('owner_org', types.UnicodeText),
         Column('creator_user_id', types.UnicodeText),
+        Column('metadata_created', types.DateTime, default=datetime.datetime.utcnow),
         Column('metadata_modified', types.DateTime, default=datetime.datetime.utcnow),
         Column('private', types.Boolean, default=False),
 )
@@ -76,8 +79,10 @@ class Package(vdm.sqlalchemy.RevisionedObjectMixin,
     @classmethod
     def get(cls, reference):
         '''Returns a package object referenced by its id or name.'''
-        query = meta.Session.query(cls).filter(cls.id==reference)
-        pkg = query.first()
+        if not reference:
+            return None
+
+        pkg = meta.Session.query(cls).get(reference)
         if pkg == None:
             pkg = cls.by_name(reference)
         return pkg
@@ -199,7 +204,7 @@ class Package(vdm.sqlalchemy.RevisionedObjectMixin,
         groups = [getattr(group, ref_group_by) for group in self.get_groups()]
         groups.sort()
         _dict['groups'] = groups
-        _dict['extras'] = dict([(key, value) for key, value in self.extras.items()])
+        _dict['extras'] = {key: value for key, value in self.extras.items()}
         _dict['ratings_average'] = self.get_average_rating()
         _dict['ratings_count'] = len(self.ratings)
         _dict['resources'] = [res.as_dict(core_columns_only=False) \
@@ -227,16 +232,18 @@ class Package(vdm.sqlalchemy.RevisionedObjectMixin,
         if type_ in package_relationship.PackageRelationship.get_forward_types():
             subject = self
             object_ = related_package
+            direction = "forward"
         elif type_ in package_relationship.PackageRelationship.get_reverse_types():
             type_ = package_relationship.PackageRelationship.reverse_to_forward_type(type_)
             assert type_
             subject = related_package
             object_ = self
+            direction = "reverse"
         else:
             raise KeyError, 'Package relationship type: %r' % type_
 
         rels = self.get_relationships(with_package=related_package,
-                                      type=type_, active=False, direction="forward")
+                                      type=type_, active=False, direction=direction)
         if rels:
             rel = rels[0]
             if comment:
@@ -480,16 +487,6 @@ class Package(vdm.sqlalchemy.RevisionedObjectMixin,
             groupcaps = zip( groups,caps )
             groups = [g[0] for g in groupcaps if g[1] == capacity]
         return groups
-
-    @property
-    def metadata_created(self):
-        import ckan.model as model
-        q = meta.Session.query(model.PackageRevision.revision_timestamp)\
-            .filter(model.PackageRevision.id == self.id)\
-            .order_by(model.PackageRevision.revision_timestamp.asc())
-        ts = q.first()
-        if ts:
-            return ts[0]
 
     @staticmethod
     def get_fields(core_only=False, fields_to_ignore=None):

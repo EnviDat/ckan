@@ -1,6 +1,8 @@
+# encoding: utf-8
+
 from nose import tools as nosetools
 
-import ckan.new_tests.helpers as helpers
+import ckan.tests.helpers as helpers
 import ckan.plugins as plugins
 
 
@@ -67,7 +69,7 @@ class TestExampleIConfigurerBuildExtraAdminTabsHelper(helpers.FunctionalTestBase
         Correct string returned when ckan.admin_tabs option has single value in config.
         '''
         app = self._get_test_app()
-        expected = """<li><a href="/ckan-admin/myext_config_one"><i class="icon-picture"></i> My Label</a></li>"""
+        expected = """<li><a href="/ckan-admin/myext_config_one"><i class="fa fa-picture-o"></i> My Label</a></li>"""
         response = app.get('/build_extra_admin_nav')
         nosetools.assert_equal(response.body, expected)
 
@@ -77,6 +79,6 @@ class TestExampleIConfigurerBuildExtraAdminTabsHelper(helpers.FunctionalTestBase
         Correct string returned when ckan.admin_tabs option has two values in config.
         '''
         app = self._get_test_app()
-        expected = """<li><a href="/ckan-admin/myext_config_two"><i class="icon-picture"></i> My Other Label</a></li><li><a href="/ckan-admin/myext_config_one"><i class="icon-picture"></i> My Label</a></li>"""
+        expected = """<li><a href="/ckan-admin/myext_config_two"><i class="fa fa-picture-o"></i> My Other Label</a></li><li><a href="/ckan-admin/myext_config_one"><i class="fa fa-picture-o"></i> My Label</a></li>"""
         response = app.get('/build_extra_admin_nav')
         nosetools.assert_equal(response.body, expected)

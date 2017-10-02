@@ -1,15 +1,17 @@
+# encoding: utf-8
+
 import os
 import cgi
-import pylons
 import datetime
 import logging
+import magic
 import mimetypes
 
 import ckan.lib.munge as munge
 import ckan.logic as logic
 import ckan.plugins as plugins
+from ckan.common import config
 
-config = pylons.config
 log = logging.getLogger(__name__)
 
 _storage_path = None
@@ -182,7 +184,6 @@ class ResourceUpload(object):
     def __init__(self, resource):
         path = get_storage_path()
         config_mimetype_guess = config.get('ckan.mimetype_guess', 'file_ext')
-        
         if not path:
             self.storage_path = None
             return
@@ -197,6 +198,7 @@ class ResourceUpload(object):
         self.mimetype = None
 
         url = resource.get('url')
+
         upload_field_storage = resource.pop('upload', None)
         self.clear = resource.pop('clear_upload', None)
 
@@ -204,15 +206,14 @@ class ResourceUpload(object):
             self.mimetype = mimetypes.guess_type(url)[0]
 
         if isinstance(upload_field_storage, cgi.FieldStorage):
-            self.filesize = 0 # bytes
-            
+            self.filesize = 0  # bytes
             self.filename = upload_field_storage.filename
             self.filename = munge.munge_filename(self.filename)
             resource['url'] = self.filename
             resource['url_type'] = 'upload'
             resource['last_modified'] = datetime.datetime.utcnow()
             self.upload_file = upload_field_storage.file
-            
+
             self.upload_file.seek(0, os.SEEK_END)
             self.filesize = self.upload_file.tell()
             # go back to the beginning of the file buffer
@@ -230,6 +231,7 @@ class ResourceUpload(object):
                 except IOError, e:
                     # Not that important if call above fails
                     self.mimetype = None
+
         elif self.clear:
             resource['url_type'] = ''
 
@@ -280,6 +282,7 @@ class ResourceUpload(object):
                 current_size = current_size + 1
                 # MB chunks
                 data = self.upload_file.read(2 ** 20)
+
                 if not data:
                     break
                 output_file.write(data)
@@ -288,6 +291,7 @@ class ResourceUpload(object):
                     raise logic.ValidationError(
                         {'upload': ['File upload too large']}
                     )
+
             output_file.close()
             os.rename(tmp_filepath, filepath)
             return

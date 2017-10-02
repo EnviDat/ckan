@@ -1,14 +1,11 @@
 #!/usr/bin/env python
+# encoding: utf-8
+
 '''Script for checking for common translation mistakes in po files, see:
 
     paster check-po-files --help
 
 for usage.
-
-Requires polib <http://pypi.python.org/pypi/polib>:
-
-    pip install polib
-
 '''
 import polib
 import re

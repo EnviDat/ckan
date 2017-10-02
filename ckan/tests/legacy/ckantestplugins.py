@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 from collections import defaultdict
 
 import ckan.plugins as p
@@ -85,12 +87,6 @@ class MockGroupControllerPlugin(p.SingletonPlugin):
     def edit(self, entity):
         self.calls['edit'] += 1
 
-    def authz_add_role(self, object_role):
-        self.calls['authz_add_role'] += 1
-
-    def authz_remove_role(self, object_role):
-        self.calls['authz_remove_role'] += 1
-
     def delete(self, entity):
         self.calls['delete'] += 1
 
@@ -113,12 +109,6 @@ class MockPackageControllerPlugin(p.SingletonPlugin):
 
     def edit(self, entity):
         self.calls['edit'] += 1
-
-    def authz_add_role(self, object_role):
-        self.calls['authz_add_role'] += 1
-
-    def authz_remove_role(self, object_role):
-        self.calls['authz_remove_role'] += 1
 
     def delete(self, entity):
         self.calls['delete'] += 1

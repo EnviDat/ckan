@@ -5630,11 +5630,6 @@ a.tag:hover {
   font-weight: bold;
   color: #000000;
 }
-.module .pagination {
-  height: 34px;
-  margin-bottom: 0;
-  border-top: 1px solid #dddddd;
-}
 .module-content .pagination {
   margin-left: -25px;
   margin-right: -25px;
@@ -5650,8 +5645,8 @@ a.tag:hover {
   border: 0;
 }
 .module .pagination li a {
-  border-top: none;
-  border-bottom: none;
+  border-top: 1px solid #dddddd;
+  border-bottom: 1px solid #dddddd;
   padding-top: 7px;
   padding-bottom: 7px;
 }
@@ -5660,16 +5655,6 @@ a.tag:hover {
   -webkit-border-radius: 0;
   -moz-border-radius: 0;
   border-radius: 0;
-}
-.module .pagination li:first-child a {
-  border-left-width: 0;
-}
-.module .pagination li:last-child a {
-  border-right-width: 0;
-}
-.module .pagination li.active a {
-  border-left-width: 1px;
-  border-right-width: 1px;
 }
 .module-content-shallow {
   padding: 0;
@@ -5778,7 +5763,7 @@ a.tag:hover {
   margin-top: 0;
 }
 .ckanext-datapreview > iframe {
-  min-height: 400px;
+  min-height: 650px;
 }
 .ckanext-datapreview > img {
   max-height: 500px;
@@ -5870,6 +5855,9 @@ a.tag:hover {
 @media (min-width: 768px) {
   .media-grid {
     margin-left: -27px;
+  }
+  .module-content .wide .media-grid {
+    margin-left: -25px;
   }
 }
 .media-item {
@@ -6370,7 +6358,7 @@ textarea {
 }
 @media (min-width: 980px) {
   .form-horizontal .info-block {
-    padding: 6px 0 6px 25px;
+    padding: 6px 0 6px 0;
   }
   .form-horizontal .info-inline {
     float: right;
@@ -6891,7 +6879,7 @@ textarea {
   box-shadow: none;
 }
 .js .image-upload #field-image-url {
-  padding-right: 29px;
+  padding-right: 90px;
 }
 .js .image-upload #field-image-upload {
   cursor: pointer;
@@ -6922,7 +6910,7 @@ textarea {
   margin-right: 0;
   top: 4px;
   right: 5px;
-  padding: 0 4px;
+  padding: 0 12px;
   -webkit-border-radius: 100px;
   -moz-border-radius: 100px;
   border-radius: 100px;
@@ -7336,7 +7324,7 @@ textarea {
   padding: 15px;
 }
 .search-form .search-input.search-giant button {
-  margin-top: -15px;
+  margin-top: -4px;
   right: 15px;
   height: 30px;
 }

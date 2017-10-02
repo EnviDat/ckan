@@ -1,4 +1,6 @@
-from pylons import config
+# encoding: utf-8
+
+from ckan.common import config
 
 import ckan.lib.base as base
 import ckan.lib.helpers as h
@@ -16,7 +18,8 @@ _ = base._
 
 
 def get_sysadmins():
-    q = model.Session.query(model.User).filter(model.User.sysadmin==True)
+    q = model.Session.query(model.User).filter(model.User.sysadmin == True,
+                                               model.User.state == 'active')
     return q.all()
 
 
@@ -28,7 +31,7 @@ class AdminController(base.BaseController):
         try:
             logic.check_access('sysadmin', context, {})
         except logic.NotAuthorized:
-            base.abort(401, _('Need to be system administrator to administer'))
+            base.abort(403, _('Need to be system administrator to administer'))
         c.revision_change_state_allowed = True
 
     def _get_config_form_items(self):
@@ -47,7 +50,8 @@ class AdminController(base.BaseController):
             {'name': 'ckan.site_title', 'control': 'input', 'label': _('Site Title'), 'placeholder': ''},
             {'name': 'ckan.main_css', 'control': 'select', 'options': styles, 'label': _('Style'), 'placeholder': ''},
             {'name': 'ckan.site_description', 'control': 'input', 'label': _('Site Tag Line'), 'placeholder': ''},
-            {'name': 'ckan.site_logo', 'control': 'input', 'label': _('Site Tag Logo'), 'placeholder': ''},
+            {'name': 'ckan.site_logo', 'control': 'image_upload', 'label': _('Site Tag Logo'), 'placeholder': '', 'upload_enabled':h.uploads_enabled(),
+                'field_url': 'ckan.site_logo', 'field_upload': 'logo_upload', 'field_clear': 'clear_logo_upload'},
             {'name': 'ckan.site_about', 'control': 'markdown', 'label': _('About'), 'placeholder': _('About page text')},
             {'name': 'ckan.site_intro_text', 'control': 'markdown', 'label': _('Intro Text'), 'placeholder': _('Text on home page')},
             {'name': 'ckan.site_custom_css', 'control': 'textarea', 'label': _('Custom CSS'), 'placeholder': _('Customisable css inserted into the page header')},

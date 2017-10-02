@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import collections
 import csv
 import multiprocessing as mp
@@ -9,24 +11,51 @@ import re
 import itertools
 import json
 import logging
+import urlparse
+from optparse import OptionConflictError
+import traceback
+
+import sqlalchemy as sa
+import routes
+import paste.script
+from paste.registry import Registry
+from paste.script.util.logging_config import fileConfig
+import click
+
 import ckan.logic as logic
 import ckan.model as model
 import ckan.include.rjsmin as rjsmin
 import ckan.include.rcssmin as rcssmin
 import ckan.lib.fanstatic_resources as fanstatic_resources
 import ckan.plugins as p
-import sqlalchemy as sa
-import urlparse
-import routes
-from pylons import config
+from ckan.common import config
 
-import paste.script
-from paste.registry import Registry
-from paste.script.util.logging_config import fileConfig
 
 #NB No CKAN imports are allowed until after the config file is loaded.
 #   i.e. do the imports in methods, after _load_config is called.
 #   Otherwise loggers get disabled.
+
+
+def deprecation_warning(message=None):
+    '''
+    Print a deprecation warning to STDERR.
+
+    If ``message`` is given it is also printed to STDERR.
+    '''
+    sys.stderr.write(u'WARNING: This function is deprecated.')
+    if message:
+        sys.stderr.write(u' ' + message.strip())
+    sys.stderr.write(u'\n')
+
+
+def error(msg):
+    '''
+    Print an error message to STDOUT and exit with return code 1.
+    '''
+    sys.stderr.write(msg)
+    if not msg.endswith('\n'):
+        sys.stderr.write('\n')
+    sys.exit(1)
 
 
 def parse_db_config(config_key='sqlalchemy.url'):
@@ -35,7 +64,7 @@ def parse_db_config(config_key='sqlalchemy.url'):
 
     'postgres://tester:pass@localhost/ckantest3'
     '''
-    from pylons import config
+    from ckan.common import config
     url = config[config_key]
     regex = [
         '^\s*(?P<db_type>\w*)',
@@ -56,6 +85,54 @@ def parse_db_config(config_key='sqlalchemy.url'):
     db_details = db_details_match.groupdict()
     return db_details
 
+
+def user_add(args):
+    '''Add new user if we use paster sysadmin add
+    or paster user add
+    '''
+    if len(args) < 2:
+        error('Need name and email of the user.')
+    username = args[0]
+
+    # parse args into data_dict
+    data_dict = {'name': username}
+    for arg in args[1:]:
+        try:
+            field, value = arg.split('=', 1)
+            data_dict[field] = value
+        except ValueError:
+            raise ValueError(
+                'Could not parse arg: %r (expected "<option>=<value>)"' % arg
+            )
+
+    if 'password' not in data_dict:
+        data_dict['password'] = UserCmd.password_prompt()
+
+    if 'fullname' in data_dict:
+        data_dict['fullname'] = data_dict['fullname'].decode(
+            sys.getfilesystemencoding()
+        )
+
+    print('Creating user: %r' % username)
+
+    try:
+        import ckan.logic as logic
+        import ckan.model as model
+        site_user = logic.get_action('get_site_user')({
+            'model': model,
+            'ignore_auth': True},
+            {}
+        )
+        context = {
+            'model': model,
+            'session': model.Session,
+            'ignore_auth': True,
+            'user': site_user['name'],
+        }
+        user_dict = logic.get_action('user_create')(context, data_dict)
+        pprint(user_dict)
+    except logic.ValidationError, e:
+        error(traceback.format_exc())
 
 ## from http://code.activestate.com/recipes/577058/ MIT licence.
 ## Written by Trent Mick
@@ -105,11 +182,119 @@ class MockTranslator(object):
         return singular
 
 
+def _get_config(config=None):
+    from paste.deploy import appconfig
+
+    if config:
+        filename = os.path.abspath(config)
+        config_source = '-c parameter'
+    elif os.environ.get('CKAN_INI'):
+        filename = os.environ.get('CKAN_INI')
+        config_source = '$CKAN_INI'
+    else:
+        default_filename = 'development.ini'
+        filename = os.path.join(os.getcwd(), default_filename)
+        if not os.path.exists(filename):
+            # give really clear error message for this common situation
+            msg = 'ERROR: You need to specify the CKAN config (.ini) '\
+                'file path.'\
+                '\nUse the --config parameter or set environment ' \
+                'variable CKAN_INI or have {}\nin the current directory.' \
+                .format(default_filename)
+            exit(msg)
+
+    if not os.path.exists(filename):
+        msg = 'Config file not found: %s' % filename
+        msg += '\n(Given by: %s)' % config_source
+        exit(msg)
+
+    fileConfig(filename)
+    return appconfig('config:' + filename)
+
+
+def load_config(config, load_site_user=True):
+    conf = _get_config(config)
+    assert 'ckan' not in dir()  # otherwise loggers would be disabled
+    # We have now loaded the config. Now we can import ckan for the
+    # first time.
+    from ckan.config.environment import load_environment
+    load_environment(conf.global_conf, conf.local_conf)
+
+    registry = Registry()
+    registry.prepare()
+    import pylons
+    registry.register(pylons.translator, MockTranslator())
+
+    site_user = None
+    if model.user_table.exists() and load_site_user:
+        # If the DB has already been initialized, create and register
+        # a pylons context object, and add the site user to it, so the
+        # auth works as in a normal web request
+        c = pylons.util.AttribSafeContextObj()
+
+        registry.register(pylons.c, c)
+
+        site_user = logic.get_action('get_site_user')({'ignore_auth': True}, {})
+
+        pylons.c.user = site_user['name']
+        pylons.c.userobj = model.User.get(site_user['name'])
+
+    ## give routes enough information to run url_for
+    parsed = urlparse.urlparse(conf.get('ckan.site_url', 'http://0.0.0.0'))
+    request_config = routes.request_config()
+    request_config.host = parsed.netloc + parsed.path
+    request_config.protocol = parsed.scheme
+
+    return site_user
+
+
+def paster_click_group(summary):
+    '''Return a paster command click.Group for paster subcommands
+
+    :param command: the paster command linked to this function from
+        setup.py, used in help text (e.g. "datastore")
+    :param summary: summary text used in paster's help/command listings
+        (e.g. "Perform commands to set up the datastore")
+    '''
+    class PasterClickGroup(click.Group):
+        '''A click.Group that may be called like a paster command'''
+        def __call__(self, ignored_command):
+            sys.argv.remove(ignored_command)
+            return super(PasterClickGroup, self).__call__(
+                prog_name=u'paster ' + ignored_command,
+                help_option_names=[u'-h', u'--help'],
+                obj={})
+
+    @click.group(cls=PasterClickGroup)
+    @click.option(
+        '--plugin',
+        metavar='ckan',
+        help='paster plugin (when run outside ckan directory)')
+    @click_config_option
+    @click.pass_context
+    def cli(ctx, plugin, config):
+        ctx.obj['config'] = config
+
+
+    cli.summary = summary
+    cli.group_name = u'ckan'
+    return cli
+
+
+# common definition for paster ... --config
+click_config_option = click.option(
+    '-c',
+    '--config',
+    default=None,
+    metavar='CONFIG',
+    help=u'Config file to use (default: development.ini)')
+
+
 class CkanCommand(paste.script.command.Command):
     '''Base class for classes that implement CKAN paster commands to inherit.'''
     parser = paste.script.command.Command.standard_parser(verbose=True)
     parser.add_option('-c', '--config', dest='config',
-                      default='development.ini', help='Config file to use.')
+                      help='Config file to use.')
     parser.add_option('-f', '--file',
                       action='store',
                       dest='file_path',
@@ -117,63 +302,8 @@ class CkanCommand(paste.script.command.Command):
     default_verbosity = 1
     group_name = 'ckan'
 
-    def _get_config(self):
-        from paste.deploy import appconfig
-
-        if self.options.config:
-            self.filename = os.path.abspath(self.options.config)
-            config_source = '-c parameter'
-        elif os.environ.get('CKAN_INI'):
-            self.filename = os.environ.get('CKAN_INI')
-            config_source = '$CKAN_INI'
-        else:
-            self.filename = os.path.join(os.getcwd(), 'development.ini')
-            config_source = 'default value'
-
-        if not os.path.exists(self.filename):
-            msg = 'Config file not found: %s' % self.filename
-            msg += '\n(Given by: %s)' % config_source
-            raise self.BadCommand(msg)
-
-        fileConfig(self.filename)
-        return appconfig('config:' + self.filename)
-
     def _load_config(self, load_site_user=True):
-        conf = self._get_config()
-        assert 'ckan' not in dir()  # otherwise loggers would be disabled
-        # We have now loaded the config. Now we can import ckan for the
-        # first time.
-        from ckan.config.environment import load_environment
-        load_environment(conf.global_conf, conf.local_conf)
-
-        self.registry = Registry()
-        self.registry.prepare()
-        import pylons
-        self.translator_obj = MockTranslator()
-        self.registry.register(pylons.translator, self.translator_obj)
-
-        if model.user_table.exists() and load_site_user:
-            # If the DB has already been initialized, create and register
-            # a pylons context object, and add the site user to it, so the
-            # auth works as in a normal web request
-            c = pylons.util.AttribSafeContextObj()
-
-            self.registry.register(pylons.c, c)
-
-            self.site_user = logic.get_action('get_site_user')({'ignore_auth': True}, {})
-
-            pylons.c.user = self.site_user['name']
-            pylons.c.userobj = model.User.get(self.site_user['name'])
-
-        ## give routes enough information to run url_for
-        parsed = urlparse.urlparse(conf.get('ckan.site_url', 'http://0.0.0.0'))
-        request_config = routes.request_config()
-        request_config.host = parsed.netloc + parsed.path
-        request_config.protocol = parsed.scheme
-
-    def _setup_app(self):
-        cmd = paste.script.appinstall.SetupCommand('setup-app')
-        cmd.run([self.filename])
+        self.site_user = load_config(self.options.config, load_site_user)
 
 
 class ManageDb(CkanCommand):
@@ -181,16 +311,14 @@ class ManageDb(CkanCommand):
 
     db create                      - alias of db upgrade
     db init                        - create and put in default data
-    db clean
+    db clean                       - clears db (including dropping tables) and
+                                     search index
     db upgrade [version no.]       - Data migrate
     db version                     - returns current version of data schema
-    db dump FILE_PATH              - dump to a pg_dump file
-    db simple-dump-csv FILE_PATH   - dump just datasets in CSV format
-    db simple-dump-json FILE_PATH  - dump just datasets in JSON format
-    db user-dump-csv FILE_PATH     - dump user information to a CSV file
-    db load FILE_PATH              - load a pg_dump from a file
+    db dump FILE_PATH              - dump to a pg_dump file [DEPRECATED]
+    db load FILE_PATH              - load a pg_dump from a file [DEPRECATED]
     db load-only FILE_PATH         - load a pg_dump from a file but don\'t do
-                                     the schema upgrade or search indexing
+                                     the schema upgrade or search indexing [DEPRECATED]
     db create-from-model           - create database from the model (indexes not made)
     db migrate-filestore           - migrate all uploaded data from the 2.1 filesore.
     '''
@@ -238,12 +366,6 @@ class ManageDb(CkanCommand):
             self.load()
         elif cmd == 'load-only':
             self.load(only_load=True)
-        elif cmd == 'simple-dump-csv':
-            self.simple_dump_csv()
-        elif cmd == 'simple-dump-json':
-            self.simple_dump_json()
-        elif cmd == 'user-dump-csv':
-            self.user_dump_csv()
         elif cmd == 'create-from-model':
             model.repo.create_db()
             if self.verbose:
@@ -251,8 +373,7 @@ class ManageDb(CkanCommand):
         elif cmd == 'migrate-filestore':
             self.migrate_filestore()
         else:
-            print 'Command %s not recognized' % cmd
-            sys.exit(1)
+            error('Command %s not recognized' % cmd)
 
     def _get_db_config(self):
         return parse_db_config()
@@ -297,6 +418,7 @@ class ManageDb(CkanCommand):
             raise SystemError('Command exited with errorcode: %i' % retcode)
 
     def dump(self):
+        deprecation_warning(u"Use PostgreSQL's pg_dump instead.")
         if len(self.args) < 2:
             print 'Need pg_dump filepath'
             return
@@ -306,6 +428,7 @@ class ManageDb(CkanCommand):
         pg_cmd = self._postgres_dump(dump_path)
 
     def load(self, only_load=False):
+        deprecation_warning(u"Use PostgreSQL's pg_restore instead.")
         if len(self.args) < 2:
             print 'Need pg_dump filepath'
             return
@@ -324,35 +447,6 @@ class ManageDb(CkanCommand):
         else:
             print 'Now remember you have to call \'db upgrade\' and then \'search-index rebuild\'.'
         print 'Done'
-
-    def simple_dump_csv(self):
-        import ckan.model as model
-        if len(self.args) < 2:
-            print 'Need csv file path'
-            return
-        dump_filepath = self.args[1]
-        import ckan.lib.dumper as dumper
-        dump_file = open(dump_filepath, 'w')
-        dumper.SimpleDumper().dump(dump_file, format='csv')
-
-    def simple_dump_json(self):
-        import ckan.model as model
-        if len(self.args) < 2:
-            print 'Need json file path'
-            return
-        dump_filepath = self.args[1]
-        import ckan.lib.dumper as dumper
-        dump_file = open(dump_filepath, 'w')
-        dumper.SimpleDumper().dump(dump_file, format='json')
-
-    def user_dump_csv(self):
-        if len(self.args) < 2:
-            print 'Need csv file path'
-            return
-        dump_filepath = self.args[1]
-        import ckan.lib.dumper as dumper
-        dump_file = open(dump_filepath, 'w')
-        dumper.UserDumper().dump(dump_file)
 
     def migrate_filestore(self):
         from ckan.model import Session
@@ -386,10 +480,11 @@ class ManageDb(CkanCommand):
                         out.write(chunk)
 
             Session.execute("update resource set url_type = 'upload'"
-                            "where id = '%s'" % id)
+                            "where id = :id", {'id': id})
             Session.execute("update resource_revision set url_type = 'upload'"
-                            "where id = '%s' and "
-                            "revision_id = '%s'" % (id, revision_id))
+                            "where id = :id and "
+                            "revision_id = :revision_id",
+                            {'id': id, 'revision_id': revision_id})
             Session.commit()
             print "Saved url %s" % url
 
@@ -603,7 +698,7 @@ class RDFExport(CkanCommand):
         '''
         import urlparse
         import urllib2
-        import pylons.config as config
+        from ckan.common import config
         import ckan.model as model
         import ckan.logic as logic
         import ckan.lib.helpers as h
@@ -630,9 +725,8 @@ class RDFExport(CkanCommand):
                     r = urllib2.urlopen(url).read()
                 except urllib2.HTTPError, e:
                     if e.code == 404:
-                        print ('Please install ckanext-dcat and enable the ' +
-                               '`dcat` plugin to use the RDF serializations')
-                        sys.exit(1)
+                        error('Please install ckanext-dcat and enable the ' +
+                              '`dcat` plugin to use the RDF serializations')
                 with open(fname, 'wb') as f:
                     f.write(r)
             except IOError, ioe:
@@ -651,12 +745,11 @@ class Sysadmin(CkanCommand):
 
     summary = __doc__.split('\n')[0]
     usage = __doc__
-    max_args = 2
+    max_args = None
     min_args = 0
 
     def command(self):
         self._load_config()
-        import ckan.model as model
 
         cmd = self.args[0] if self.args else None
         if cmd is None or cmd == 'list':
@@ -671,7 +764,8 @@ class Sysadmin(CkanCommand):
     def list(self):
         import ckan.model as model
         print 'Sysadmins:'
-        sysadmins = model.Session.query(model.User).filter_by(sysadmin=True)
+        sysadmins = model.Session.query(model.User).filter_by(sysadmin=True,
+                                                              state='active')
         print 'count = %i' % sysadmins.count()
         for sysadmin in sysadmins:
             print '%s name=%s id=%s' % (sysadmin.__class__.__name__,
@@ -691,10 +785,8 @@ class Sysadmin(CkanCommand):
             print 'User "%s" not found' % username
             makeuser = raw_input('Create new user: %s? [y/n]' % username)
             if makeuser == 'y':
-                password = UserCmd.password_prompt()
-                print('Creating %s user' % username)
-                user = model.User(name=unicode(username),
-                                  password=password)
+                user_add(self.args[1:])
+                user = model.User.by_name(unicode(username))
             else:
                 print 'Exiting ...'
                 return
@@ -744,7 +836,6 @@ class UserCmd(CkanCommand):
 
     def command(self):
         self._load_config()
-        import ckan.model as model
 
         if not self.args:
             self.list()
@@ -820,49 +911,11 @@ class UserCmd(CkanCommand):
             password1 = getpass.getpass('Password: ')
         password2 = getpass.getpass('Confirm password: ')
         if password1 != password2:
-            print 'Passwords do not match'
-            sys.exit(1)
+            error('Passwords do not match')
         return password1
 
     def add(self):
-        import ckan.model as model
-
-        if len(self.args) < 2:
-            print 'Need name of the user.'
-            sys.exit(1)
-        username = self.args[1]
-
-        # parse args into data_dict
-        data_dict = {'name': username}
-        for arg in self.args[2:]:
-            try:
-                field, value = arg.split('=', 1)
-                data_dict[field] = value
-            except ValueError:
-                raise ValueError('Could not parse arg: %r (expected "<option>=<value>)"' % arg)
-
-        if 'password' not in data_dict:
-            data_dict['password'] = self.password_prompt()
-
-        if 'fullname' in data_dict:
-            data_dict['fullname'] = data_dict['fullname'].decode(sys.getfilesystemencoding())
-
-        print('Creating user: %r' % username)
-
-        try:
-            import ckan.logic as logic
-            site_user = logic.get_action('get_site_user')({'model': model, 'ignore_auth': True}, {})
-            context = {
-                'model': model,
-                'session': model.Session,
-                'ignore_auth': True,
-                'user': site_user['name'],
-            }
-            user_dict = logic.get_action('user_create')(context, data_dict)
-            pprint(user_dict)
-        except logic.ValidationError, e:
-            print e
-            sys.exit(1)
+        user_add(self.args[1:])
 
     def remove(self):
         import ckan.model as model
@@ -872,12 +925,9 @@ class UserCmd(CkanCommand):
             return
         username = self.args[1]
 
-        user = model.User.by_name(unicode(username))
-        if not user:
-            print 'Error: user "%s" not found!' % username
-            return
-        user.delete()
-        model.repo.commit_and_remove()
+        p.toolkit.get_action('user_delete')(
+            {'model': model, 'ignore_auth': True},
+            {'id': username})
         print('Deleted user: %s' % username)
 
 
@@ -958,7 +1008,9 @@ class DatasetCmd(CkanCommand):
 
 
 class Celery(CkanCommand):
-    '''Celery daemon
+    '''Celery daemon [DEPRECATED]
+
+    This command is DEPRECATED, use `paster jobs` instead.
 
     Usage:
         celeryd <run>            - run the celery daemon
@@ -984,10 +1036,10 @@ class Celery(CkanCommand):
             elif cmd == 'clean':
                 self.clean()
             else:
-                print 'Command %s not recognized' % cmd
-                sys.exit(1)
+                error('Command %s not recognized' % cmd)
 
     def run_(self):
+        deprecation_warning(u'Use `paster jobs worker` instead.')
         default_ini = os.path.join(os.getcwd(), 'development.ini')
 
         if self.options.config:
@@ -995,8 +1047,7 @@ class Celery(CkanCommand):
         elif os.path.isfile(default_ini):
             os.environ['CKAN_CONFIG'] = default_ini
         else:
-            print 'No .ini specified and none was found in current directory'
-            sys.exit(1)
+            error('No .ini specified and none was found in current directory')
 
         from ckan.lib.celery_app import celery
         celery_args = []
@@ -1005,6 +1056,7 @@ class Celery(CkanCommand):
         celery.worker_main(argv=['celeryd', '--loglevel=INFO'] + celery_args)
 
     def view(self):
+        deprecation_warning(u'Use `paster jobs list` instead.')
         self._load_config()
         import ckan.model as model
         from kombu.transport.sqlalchemy.models import Message
@@ -1019,6 +1071,7 @@ class Celery(CkanCommand):
                 print '%i: Invisible Sent:%s' % (message.id, message.sent_at)
 
     def clean(self):
+        deprecation_warning(u'Use `paster jobs clear` instead.')
         self._load_config()
         import ckan.model as model
         query = model.Session.execute("select * from kombu_message")
@@ -1032,8 +1085,7 @@ class Celery(CkanCommand):
         print '%i of %i tasks deleted' % (tasks_initially - tasks_afterwards,
                                           tasks_initially)
         if tasks_afterwards:
-            print 'ERROR: Failed to delete all tasks'
-            sys.exit(1)
+            error('Failed to delete all tasks')
         model.repo.commit_and_remove()
 
 
@@ -1113,15 +1165,13 @@ class Tracking(CkanCommand):
             self.update_all(engine, start_date)
         elif cmd == 'export':
             if len(self.args) <= 1:
-                print self.__class__.__doc__
-                sys.exit(1)
+                error(self.__class__.__doc__)
             output_file = self.args[1]
             start_date = self.args[2] if len(self.args) > 2 else None
             self.update_all(engine, start_date)
             self.export_tracking(engine, output_file)
         else:
-            print self.__class__.__doc__
-            sys.exit(1)
+            error(self.__class__.__doc__)
 
     def update_all(self, engine, start_date=None):
         if start_date:
@@ -1211,7 +1261,7 @@ class Tracking(CkanCommand):
                      CAST(access_timestamp AS Date) AS tracking_date,
                      tracking_type INTO tracking_tmp
                  FROM tracking_raw
-                 WHERE CAST(access_timestamp as Date)='%s';
+                 WHERE CAST(access_timestamp as Date)=%s;
 
                  INSERT INTO tracking_summary
                    (url, count, tracking_date, tracking_type)
@@ -1220,8 +1270,8 @@ class Tracking(CkanCommand):
                  GROUP BY url, tracking_date, tracking_type;
 
                  DROP TABLE tracking_tmp;
-                 COMMIT;''' % summary_date
-        engine.execute(sql)
+                 COMMIT;'''
+        engine.execute(sql, summary_date)
 
         # get ids for dataset urls
         sql = '''UPDATE tracking_summary t
@@ -1413,7 +1463,6 @@ class CreateTestDataCommand(CkanCommand):
 
     def command(self):
         self._load_config()
-        self._setup_app()
         from ckan import plugins
         from create_test_data import CreateTestData
 
@@ -1452,10 +1501,10 @@ class Profile(CkanCommand):
     '''Code speed profiler
     Provide a ckan url and it will make the request and record
     how long each function call took in a file that can be read
-    by runsnakerun.
+    by pstats.Stats (command-line) or runsnakerun (gui).
 
     Usage:
-       profile URL
+       profile URL [username]
 
     e.g. profile /data/search
 
@@ -1467,7 +1516,7 @@ class Profile(CkanCommand):
     '''
     summary = __doc__.split('\n')[0]
     usage = __doc__
-    max_args = 1
+    max_args = 2
     min_args = 1
 
     def _load_config_into_test_app(self):
@@ -1492,22 +1541,30 @@ class Profile(CkanCommand):
         import re
 
         url = self.args[0]
+        if self.args[1:]:
+            user = self.args[1]
+        else:
+            user = 'visitor'
 
         def profile_url(url):
             try:
-                res = self.app.get(url, status=[200], extra_environ={'REMOTE_USER': 'visitor'})
+                res = self.app.get(url, status=[200],
+                                   extra_environ={'REMOTE_USER': user})
             except paste.fixture.AppError:
                 print 'App error: ', url.strip()
             except KeyboardInterrupt:
                 raise
-            except:
-                import traceback
-                traceback.print_exc()
-                print 'Unknown error: ', url.strip()
+            except Exception:
+                error(traceback.format_exc())
 
         output_filename = 'ckan%s.profile' % re.sub('[/?]', '.', url.replace('/', '.'))
         profile_command = "profile_url('%s')" % url
         cProfile.runctx(profile_command, globals(), locals(), filename=output_filename)
+        import pstats
+        stats = pstats.Stats(output_filename)
+        stats.sort_stats('cumulative')
+        stats.print_stats(0.1)  # show only top 10% of lines
+        print 'Only top 10% of lines shown'
         print 'Written profile to: %s' % output_filename
 
 
@@ -1782,99 +1839,18 @@ class TranslationsCommand(CkanCommand):
 
     def command(self):
         self._load_config()
-        from pylons import config
-        self.ckan_path = os.path.join(os.path.dirname(__file__), '..')
-        i18n_path = os.path.join(self.ckan_path, 'i18n')
-        self.i18n_path = config.get('ckan.i18n_directory', i18n_path)
+        from ckan.common import config
+        from ckan.lib.i18n import build_js_translations
+        ckan_path = os.path.join(os.path.dirname(__file__), '..')
+        self.i18n_path = config.get('ckan.i18n_directory',
+                                    os.path.join(ckan_path, 'i18n'))
         command = self.args[0]
         if command == 'mangle':
             self.mangle_po()
         elif command == 'js':
-            self.build_js_translations()
+            build_js_translations()
         else:
             print 'command not recognised'
-
-    def po2dict(self, po, lang):
-        '''Convert po object to dictionary data structure (ready for JSON).
-
-        This function is from pojson
-        https://bitbucket.org/obviel/pojson
-
-Copyright (c) 2010, Fanstatic Developers
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the <organization> nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL FANSTATIC DEVELOPERS BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-'''
-        result = {}
-
-        result[''] = {}
-        result['']['plural-forms'] = po.metadata['Plural-Forms']
-        result['']['lang'] = lang
-        result['']['domain'] = 'ckan'
-
-        for entry in po:
-            if entry.obsolete:
-                continue
-            # check if used in js file we only include these
-            occurrences = entry.occurrences
-            js_use = False
-            for occurrence in occurrences:
-                if occurrence[0].endswith('.js'):
-                    js_use = True
-                    continue
-            if not js_use:
-                continue
-            if entry.msgstr:
-                result[entry.msgid] = [None, entry.msgstr]
-            elif entry.msgstr_plural:
-                plural = [entry.msgid_plural]
-                result[entry.msgid] = plural
-                ordered_plural = sorted(entry.msgstr_plural.items())
-                for order, msgstr in ordered_plural:
-                    plural.append(msgstr)
-        return result
-
-    def build_js_translations(self):
-        import polib
-        import simplejson as json
-
-        def create_js(source, lang):
-            print 'Generating', lang
-            po = polib.pofile(source)
-            data = self.po2dict(po, lang)
-            data = json.dumps(data, sort_keys=True,
-                              ensure_ascii=False, indent=2 * ' ')
-            out_dir = os.path.abspath(os.path.join(self.ckan_path, 'public',
-                                                   'base', 'i18n'))
-            out_file = open(os.path.join(out_dir, '%s.js' % lang), 'w')
-            out_file.write(data.encode('utf-8'))
-            out_file.close()
-
-        for l in os.listdir(self.i18n_path):
-            if os.path.isdir(os.path.join(self.i18n_path, l)):
-                f = os.path.join(self.i18n_path, l, 'LC_MESSAGES', 'ckan.po')
-                create_js(f, l)
-        print 'Completed generating JavaScript translations'
 
     def mangle_po(self):
         ''' This will mangle the zh_TW translations for translation coverage
@@ -2259,11 +2235,9 @@ Not used when using the `-d` option.''')
                                  set(loaded_view_plugins))
 
         if plugins_not_found:
-            msg = ('View plugin(s) not found : {0}. '.format(plugins_not_found)
-                   + 'Have they been added to the `ckan.plugins` configuration'
-                   + ' option?')
-            log.error(msg)
-            sys.exit(1)
+            error('View plugin(s) not found : {0}. '.format(plugins_not_found)
+                  + 'Have they been added to the `ckan.plugins` configuration'
+                  + ' option?')
 
         return loaded_view_plugins
 
@@ -2347,8 +2321,7 @@ Not used when using the `-d` option.''')
         try:
             user_search_params = json.loads(self.options.search_params)
         except ValueError, e:
-            log.error('Unable to parse JSON search parameters: {0}'.format(e))
-            sys.exit(1)
+            error('Unable to parse JSON search parameters: {0}'.format(e))
 
         if user_search_params.get('q'):
             search_data_dict['q'] = user_search_params['q']
@@ -2376,6 +2349,7 @@ Not used when using the `-d` option.''')
             'q': '',
             'fq': '',
             'fq_list': [],
+            'include_private': True,
             'rows': n,
             'start': n * (page - 1),
         }
@@ -2399,8 +2373,7 @@ Not used when using the `-d` option.''')
             search_data_dict['q'] = '*:*'
 
         query = p.toolkit.get_action('package_search')(
-            {'ignore_capacity_check': True},
-            search_data_dict)
+            {}, search_data_dict)
 
         return query
 
@@ -2422,8 +2395,7 @@ Not used when using the `-d` option.''')
             query = self._search_datasets(page, loaded_view_plugins)
 
             if page == 1 and query['count'] == 0:
-                log.info('No datasets to create resource views on, exiting...')
-                sys.exit(1)
+                error('No datasets to create resource views on, exiting...')
 
             elif page == 1 and not self.options.assume_yes:
 
@@ -2435,8 +2407,7 @@ Not used when using the `-d` option.''')
                                                   loaded_view_plugins))
 
                 if confirm == 'no':
-                    log.info('Command aborted by user')
-                    sys.exit(1)
+                    error('Command aborted by user')
 
             if query['results']:
                 for dataset_dict in query['results']:
@@ -2481,8 +2452,7 @@ Not used when using the `-d` option.''')
             result = query_yes_no(msg, default='no')
 
             if result == 'no':
-                log.info('Command aborted by user')
-                sys.exit(1)
+                error('Command aborted by user')
 
         context = {'user': self.site_user['name']}
         logic.get_action('resource_view_clear')(
@@ -2560,15 +2530,161 @@ class ConfigToolCommand(paste.script.command.Command):
         if options:
             for option in options:
                 if '=' not in option:
-                    sys.stderr.write(
+                    error(
                         'An option does not have an equals sign: %r '
                         'It should be \'key=value\'. If there are spaces '
                         'you\'ll need to quote the option.\n' % option)
-                    sys.exit(1)
             try:
                 config_tool.config_edit_using_option_strings(
                     config_filepath, options, self.options.section,
                     edit=self.options.edit)
             except config_tool.ConfigToolError, e:
-                sys.stderr.write(e.message)
-                sys.exit(1)
+                error(traceback.format_exc())
+
+
+class JobsCommand(CkanCommand):
+    '''Manage background jobs
+
+    Usage:
+
+        paster jobs worker [--burst] [QUEUES]
+
+            Start a worker that fetches jobs from queues and executes
+            them. If no queue names are given then the worker listens
+            to the default queue, this is equivalent to
+
+                paster jobs worker default
+
+            If queue names are given then the worker listens to those
+            queues and only those:
+
+                paster jobs worker my-custom-queue
+
+            Hence, if you want the worker to listen to the default queue
+            and some others then you must list the default queue explicitly:
+
+                paster jobs worker default my-custom-queue
+
+            If the `--burst` option is given then the worker will exit
+            as soon as all its queues are empty.
+
+        paster jobs list [QUEUES]
+
+                List currently enqueued jobs from the given queues. If no queue
+                names are given then the jobs from all queues are listed.
+
+        paster jobs show ID
+
+                Show details about a specific job.
+
+        paster jobs cancel ID
+
+                Cancel a specific job. Jobs can only be canceled while they are
+                enqueued. Once a worker has started executing a job it cannot
+                be aborted anymore.
+
+        paster jobs clear [QUEUES]
+
+                Cancel all jobs on the given queues. If no queue names are
+                given then ALL queues are cleared.
+
+        paster jobs test [QUEUES]
+
+                Enqueue a test job. If no queue names are given then the job is
+                added to the default queue. If queue names are given then a
+                separate test job is added to each of the queues.
+    '''
+
+    summary = __doc__.split(u'\n')[0]
+    usage = __doc__
+    min_args = 0
+
+
+    def __init__(self, *args, **kwargs):
+        super(JobsCommand, self).__init__(*args, **kwargs)
+        try:
+            self.parser.add_option(u'--burst', action='store_true',
+                                   default=False,
+                                   help=u'Start worker in burst mode.')
+        except OptionConflictError:
+            # Option has already been added in previous call
+            pass
+
+    def command(self):
+        self._load_config()
+        try:
+            cmd = self.args.pop(0)
+        except IndexError:
+            print(self.__doc__)
+            sys.exit(0)
+        if cmd == u'worker':
+            self.worker()
+        elif cmd == u'list':
+            self.list()
+        elif cmd == u'show':
+            self.show()
+        elif cmd == u'cancel':
+            self.cancel()
+        elif cmd == u'clear':
+            self.clear()
+        elif cmd == u'test':
+            self.test()
+        else:
+            error(u'Unknown command "{}"'.format(cmd))
+
+    def worker(self):
+        from ckan.lib.jobs import Worker
+        Worker(self.args).work(burst=self.options.burst)
+
+    def list(self):
+        data_dict = {
+            u'queues': self.args,
+        }
+        jobs = p.toolkit.get_action(u'job_list')({}, data_dict)
+        for job in jobs:
+            if job[u'title'] is None:
+                job[u'title'] = ''
+            else:
+                job[u'title'] = u'"{}"'.format(job[u'title'])
+            print(u'{created} {id} {queue} {title}'.format(**job))
+
+    def show(self):
+        if not self.args:
+            error(u'You must specify a job ID')
+        id = self.args[0]
+        try:
+            job = p.toolkit.get_action(u'job_show')({}, {u'id': id})
+        except logic.NotFound:
+            error(u'There is no job with ID "{}"'.format(id))
+        print(u'ID:      {}'.format(job[u'id']))
+        if job[u'title'] is None:
+            title = u'None'
+        else:
+            title = u'"{}"'.format(job[u'title'])
+        print(u'Title:   {}'.format(title))
+        print(u'Created: {}'.format(job[u'created']))
+        print(u'Queue:   {}'.format(job[u'queue']))
+
+    def cancel(self):
+        if not self.args:
+            error(u'You must specify a job ID')
+        id = self.args[0]
+        try:
+            p.toolkit.get_action(u'job_cancel')({}, {u'id': id})
+        except logic.NotFound:
+            error(u'There is no job with ID "{}"'.format(id))
+        print(u'Cancelled job {}'.format(id))
+
+    def clear(self):
+        data_dict = {
+            u'queues': self.args,
+        }
+        queues = p.toolkit.get_action(u'job_clear')({}, data_dict)
+        queues = (u'"{}"'.format(q) for q in queues)
+        print(u'Cleared queue(s) {}'.format(u', '.join(queues)))
+
+    def test(self):
+        from ckan.lib.jobs import DEFAULT_QUEUE_NAME, enqueue, test_job
+        for queue in (self.args or [DEFAULT_QUEUE_NAME]):
+            job = enqueue(test_job, [u'A test job'], title=u'A test job', queue=queue)
+            print(u'Added test job {} to queue "{}"'.format(job.id, queue))

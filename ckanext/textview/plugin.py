@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import logging
 
 from ckan.common import json
@@ -63,7 +65,7 @@ class TextView(p.SingletonPlugin):
     def info(self):
         return {'name': 'text_view',
                 'title': p.toolkit._('Text'),
-                'icon': 'file-text-alt',
+                'icon': 'file-text-o',
                 'default_title': p.toolkit._('Text'),
                 }
 

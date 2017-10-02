@@ -18,8 +18,6 @@ import sys
 import os
 import subprocess
 
-import ckan.lib.util as util
-
 # If your extensions (or modules documented by autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
@@ -54,7 +52,7 @@ rst_epilog = '''
 .. |storage_path| replace:: |storage_parent_dir|/default
 .. |reload_apache| replace:: sudo service apache2 reload
 .. |restart_apache| replace:: sudo service apache2 restart
-.. |restart_solr| replace:: sudo service jetty restart
+.. |restart_solr| replace:: sudo service jetty8 restart
 .. |solr| replace:: Solr
 .. |restructuredtext| replace:: reStructuredText
 .. |nginx| replace:: Nginx
@@ -126,7 +124,7 @@ def latest_release_tag():
     This requires git to be installed.
 
     '''
-    git_tags = util.check_output(
+    git_tags = subprocess.check_output(
         ['git', 'tag', '-l'], stderr=subprocess.STDOUT).split()
 
     # FIXME: We could do more careful pattern matching against ckan-X.Y.Z here.
@@ -331,7 +329,7 @@ htmlhelp_basename = 'CKANdoc'
 # (source start file, target name, title, author, document class [howto/manual]).
 latex_documents = [
   ('contents', 'CKAN.tex', ur'CKAN documentation',
-   ur'Open Knowledge Foundation', 'manual'),
+   ur'CKAN contributors', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of

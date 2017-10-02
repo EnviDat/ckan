@@ -1,5 +1,7 @@
+# encoding: utf-8
+
 from bs4 import BeautifulSoup
-from nose.tools import assert_equal, assert_true
+from nose.tools import assert_equal, assert_true, assert_in
 
 from routes import url_for
 
@@ -7,7 +9,6 @@ import ckan.tests.helpers as helpers
 import ckan.model as model
 from ckan.tests import factories
 
-assert_in = helpers.assert_in
 webtest_submit = helpers.webtest_submit
 submit_and_follow = helpers.submit_and_follow
 
@@ -23,17 +24,48 @@ class TestGroupController(helpers.FunctionalTestBase):
                                    action='bulk_process', id='does-not-exist')
         app.get(url=bulk_process_url, status=404)
 
-    def test_page_thru_list_of_orgs(self):
-        orgs = [factories.Organization() for i in range(35)]
+    def test_page_thru_list_of_orgs_preserves_sort_order(self):
+        orgs = [factories.Organization() for _ in range(35)]
         app = self._get_test_app()
-        org_url = url_for(controller='organization', action='index')
+        org_url = url_for(controller='organization',
+                          action='index',
+                          sort='name desc')
         response = app.get(url=org_url)
-        assert orgs[0]['name'] in response
-        assert orgs[-1]['name'] not in response
+        assert orgs[-1]['name'] in response
+        assert orgs[0]['name'] not in response
 
         response2 = response.click('2')
-        assert orgs[0]['name'] not in response2
-        assert orgs[-1]['name'] in response2
+        assert orgs[-1]['name'] not in response2
+        assert orgs[0]['name'] in response2
+
+    def test_page_thru_list_of_groups_preserves_sort_order(self):
+        groups = [factories.Group() for _ in range(35)]
+        app = self._get_test_app()
+        group_url = url_for(controller='group',
+                            action='index',
+                            sort='title desc')
+
+        response = app.get(url=group_url)
+        assert groups[-1]['title'] in response
+        assert groups[0]['title'] not in response
+
+        response2 = response.click(r'^2$')
+        assert groups[-1]['title'] not in response2
+        assert groups[0]['title'] in response2
+
+    def test_invalid_sort_param_does_not_crash(self):
+        app = self._get_test_app()
+        group_url = url_for(controller='group',
+                            action='index',
+                            sort='title desc nope')
+
+        app.get(url=group_url)
+
+        group_url = url_for(controller='group',
+                            action='index',
+                            sort='title nope desc nope')
+
+        app.get(url=group_url)
 
 
 def _get_group_new_page(app):
@@ -50,7 +82,7 @@ class TestGroupControllerNew(helpers.FunctionalTestBase):
     def test_not_logged_in(self):
         app = self._get_test_app()
         app.get(url=url_for(controller='group', action='new'),
-                status=302)
+                status=403)
 
     def test_form_renders(self):
         app = self._get_test_app()
@@ -110,7 +142,7 @@ class TestGroupControllerEdit(helpers.FunctionalTestBase):
     def test_not_logged_in(self):
         app = self._get_test_app()
         app.get(url=url_for(controller='group', action='new'),
-                status=302)
+                status=403)
 
     def test_group_doesnt_exist(self):
         app = self._get_test_app()
@@ -214,7 +246,7 @@ class TestGroupDelete(helpers.FunctionalTestBase):
         self.app.get(url=url_for(controller='group',
                                  action='delete',
                                  id=self.group['id']),
-                     status=401,
+                     status=403,
                      extra_environ=extra_environ)
 
         group = helpers.call_action('group_show',
@@ -225,7 +257,7 @@ class TestGroupDelete(helpers.FunctionalTestBase):
         self.app.get(url=url_for(controller='group',
                                  action='delete',
                                  id=self.group['id']),
-                     status=302)  # redirects to login form
+                     status=403)
 
         group = helpers.call_action('group_show',
                                     id=self.group['id'])
@@ -264,9 +296,12 @@ class TestGroupMembership(helpers.FunctionalTestBase):
 
         group = self._create_group(user_one['name'], other_users)
 
+        env = {'REMOTE_USER': user_one['name'].encode('ascii')}
+
         member_list_url = url_for(controller='group', action='members',
                                   id=group['id'])
-        member_list_response = app.get(member_list_url)
+        member_list_response = app.get(
+            member_list_url, extra_environ=env)
 
         assert_true('2 members' in member_list_response)
 
@@ -357,7 +392,7 @@ class TestGroupMembership(helpers.FunctionalTestBase):
         env = {'REMOTE_USER': user_one['name'].encode('ascii')}
         remove_response = app.post(remove_url, extra_environ=env, status=302)
         # redirected to member list after removal
-        remove_response = remove_response.follow()
+        remove_response = remove_response.follow(extra_environ=env)
 
         assert_true('Group member has been deleted.' in remove_response)
         assert_true('1 members' in remove_response)
@@ -373,6 +408,62 @@ class TestGroupMembership(helpers.FunctionalTestBase):
 
         assert_equal(len(user_roles.keys()), 1)
         assert_equal(user_roles['User One'], 'Admin')
+
+    def test_member_users_cannot_add_members(self):
+
+        user = factories.User()
+        group = factories.Group(
+            users=[{'name': user['name'], 'capacity': 'member'}]
+        )
+
+        app = helpers._get_test_app()
+
+        env = {'REMOTE_USER': user['name'].encode('ascii')}
+
+        app.get(
+            url_for(
+                controller='group',
+                action='member_new',
+                id=group['id'],
+            ),
+            extra_environ=env,
+            status=403,
+        )
+
+        app.post(
+            url_for(
+                controller='group',
+                action='member_new',
+                id=group['id'],
+            ),
+            {'id': 'test', 'username': 'test', 'save': 'save', 'role': 'test'},
+            extra_environ=env,
+            status=403,
+        )
+
+    def test_anonymous_users_cannot_add_members(self):
+        group = factories.Group()
+
+        app = helpers._get_test_app()
+
+        app.get(
+            url_for(
+                controller='group',
+                action='member_new',
+                id=group['id'],
+            ),
+            status=403,
+        )
+
+        app.post(
+            url_for(
+                controller='group',
+                action='member_new',
+                id=group['id'],
+            ),
+            {'id': 'test', 'username': 'test', 'save': 'save', 'role': 'test'},
+            status=403,
+        )
 
 
 class TestGroupFollow(helpers.FunctionalTestBase):

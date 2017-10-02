@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import logging
 
 import ckan.plugins as p
@@ -39,11 +41,11 @@ class ResourceDataController(base.BaseController):
             except logic.ValidationError:
                 pass
 
-            base.redirect(core_helpers.url_for(
+            core_helpers.redirect_to(
                 controller='ckanext.datapusher.plugin:ResourceDataController',
                 action='resource_data',
                 id=id,
-                resource_id=resource_id)
+                resource_id=resource_id
             )
 
         try:
@@ -53,10 +55,8 @@ class ResourceDataController(base.BaseController):
             toolkit.c.resource = p.toolkit.get_action('resource_show')(
                 None, {'id': resource_id}
             )
-        except logic.NotFound:
+        except (logic.NotFound, logic.NotAuthorized):
             base.abort(404, _('Resource not found'))
-        except logic.NotAuthorized:
-            base.abort(401, _('Unauthorized to edit this resource'))
 
         try:
             datapusher_status = p.toolkit.get_action('datapusher_status')(
@@ -65,13 +65,14 @@ class ResourceDataController(base.BaseController):
         except logic.NotFound:
             datapusher_status = {}
         except logic.NotAuthorized:
-            base.abort(401, _('Not authorized to see this page'))
+            base.abort(403, _('Not authorized to see this page'))
 
-        return base.render('package/resource_data.html',
+        return base.render('datapusher/resource_data.html',
                            extra_vars={'status': datapusher_status})
 
 
 class DatapusherPlugin(p.SingletonPlugin):
+    p.implements(p.IConfigurer, inherit=True)
     p.implements(p.IConfigurable, inherit=True)
     p.implements(p.IActions)
     p.implements(p.IAuthFunctions)
@@ -82,6 +83,9 @@ class DatapusherPlugin(p.SingletonPlugin):
 
     legacy_mode = False
     resource_show_action = None
+
+    def update_config(self, config):
+        p.toolkit.add_template_directory(config, 'templates')
 
     def configure(self, config):
         self.config = config

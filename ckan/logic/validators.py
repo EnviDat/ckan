@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import collections
 import datetime
 from itertools import count
@@ -13,6 +15,7 @@ from ckan.model import (MAX_TAG_LENGTH, MIN_TAG_LENGTH,
                         VOCABULARY_NAME_MAX_LENGTH,
                         VOCABULARY_NAME_MIN_LENGTH)
 import ckan.authz as authz
+from ckan.model.core import State
 
 from ckan.common import _
 
@@ -27,7 +30,7 @@ def owner_org_validator(key, data, errors, context):
 
     if value is missing or value is None:
         if not authz.check_config_permission('create_unowned_dataset'):
-            raise Invalid(_('A organization must be supplied'))
+            raise Invalid(_('An organization must be provided'))
         data.pop(key, None)
         raise df.StopOnError
 
@@ -36,7 +39,7 @@ def owner_org_validator(key, data, errors, context):
     user = model.User.get(user)
     if value == '':
         if not authz.check_config_permission('create_unowned_dataset'):
-            raise Invalid(_('A organization must be supplied'))
+            raise Invalid(_('An organization must be provided'))
         return
 
     group = model.Group.get(value)
@@ -241,20 +244,6 @@ def group_id_exists(group_id, context):
         raise Invalid('%s: %s' % (_('Not found'), _('Group')))
     return group_id
 
-
-def related_id_exists(related_id, context):
-    '''Raises Invalid if the given related_id does not exist in the model
-    given in the context, otherwise returns the given related_id.
-
-    '''
-    model = context['model']
-    session = context['session']
-
-    result = session.query(model.Related).get(related_id)
-    if not result:
-        raise Invalid('%s: %s' % (_('Not found'), _('Related')))
-    return related_id
-
 def group_id_or_name_exists(reference, context):
     '''
     Raises Invalid if a group identified by the name or id cannot be found.
@@ -278,15 +267,6 @@ def activity_type_exists(activity_type):
     else:
         raise Invalid('%s: %s' % (_('Not found'), _('Activity type')))
 
-def resource_id_exists(value, context):
-
-    model = context['model']
-    session = context['session']
-
-    result = session.query(model.Resource).get(value)
-    if not result:
-        raise Invalid('%s: %s' % (_('Not found'), _('Resource')))
-    return value
 
 # A dictionary mapping activity_type values from activity dicts to functions
 # for validating the object_id values from those same activity dicts.
@@ -305,9 +285,6 @@ object_id_validators = {
     'changed organization' : group_id_exists,
     'deleted organization' : group_id_exists,
     'follow group' : group_id_exists,
-    'new related item': related_id_exists,
-    'deleted related item': related_id_exists,
-    'changed related item': related_id_exists,
     }
 
 def object_id_validator(key, activity_dict, errors, context):
@@ -372,7 +349,7 @@ def package_name_validator(key, data, errors, context):
     session = context['session']
     package = context.get('package')
 
-    query = session.query(model.Package.name).filter_by(name=data[key])
+    query = session.query(model.Package.state).filter_by(name=data[key])
     if package:
         package_id = package.id
     else:
@@ -380,7 +357,7 @@ def package_name_validator(key, data, errors, context):
     if package_id and package_id is not missing:
         query = query.filter(model.Package.id <> package_id)
     result = query.first()
-    if result:
+    if result and result.state != State.DELETED:
         errors[key].append(_('That URL is already in use.'))
 
     value = data[key]
@@ -854,3 +831,17 @@ def empty_if_not_sysadmin(key, data, errors, context):
         return
 
     empty(key, data, errors, context)
+
+#pattern from https://html.spec.whatwg.org/#e-mail-state-(type=email)
+email_pattern = re.compile(r"^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9]"\
+                       "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9]"\
+                       "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$")
+
+
+def email_validator(value, context):
+    '''Validate email input '''
+
+    if value:
+        if not email_pattern.match(value):
+            raise Invalid(_('Email {email} is not a valid format').format(email=value))
+    return value

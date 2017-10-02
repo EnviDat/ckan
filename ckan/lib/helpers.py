@@ -1,4 +1,4 @@
-# coding=UTF-8
+# encoding: utf-8
 
 '''Helper functions
 
@@ -13,30 +13,27 @@ import os
 import pytz
 import tzlocal
 import urllib
-import urlparse
 import pprint
 import copy
 import urlparse
 from urllib import urlencode
+import uuid
 
-from paste.deploy.converters import asbool
-from webhelpers.html import escape, HTML, literal, url_escape
-from webhelpers.html.tools import mail_to
-from webhelpers.html.tags import *
+from paste.deploy import converters
+from webhelpers.html import HTML, literal, tags, tools
 from webhelpers import paginate
-from webhelpers.text import truncate
+import webhelpers.text as whtext
 import webhelpers.date as date
 from markdown import markdown
-from bleach import clean as clean_html
+from bleach import clean as clean_html, ALLOWED_TAGS, ALLOWED_ATTRIBUTES
 from pylons import url as _pylons_default_url
-from pylons.decorators.cache import beaker_cache
-from pylons import config
-from routes import redirect_to as _redirect_to
+from ckan.common import config, is_flask_request
+from flask import redirect as _flask_redirect
+from routes import redirect_to as _routes_redirect_to
 from routes import url_for as _routes_default_url_for
-from alphabet_paginate import AlphaPage
 import i18n
-import ckan.exceptions
 
+import ckan.exceptions
 import ckan.lib.fanstatic_resources as fanstatic_resources
 import ckan.model as model
 import ckan.lib.formatters as formatters
@@ -45,15 +42,62 @@ import ckan.lib.datapreview as datapreview
 import ckan.logic as logic
 import ckan.lib.uploader as uploader
 import ckan.authz as authz
+import ckan.plugins as p
+import ckan
 
-from ckan.common import (
-    _, ungettext, g, c, request, session, json, OrderedDict
-)
+from ckan.common import _, ungettext, c, request, session, json
+from markupsafe import Markup, escape
 
-get_available_locales = i18n.get_available_locales
-get_locales_dict = i18n.get_locales_dict
 
 log = logging.getLogger(__name__)
+
+DEFAULT_FACET_NAMES = u'organization groups tags res_format license_id'
+
+MARKDOWN_TAGS = set([
+    'del', 'dd', 'dl', 'dt', 'h1', 'h2',
+    'h3', 'img', 'kbd', 'p', 'pre', 's',
+    'sup', 'sub', 'strike', 'br', 'hr'
+]).union(ALLOWED_TAGS)
+
+MARKDOWN_ATTRIBUTES = copy.deepcopy(ALLOWED_ATTRIBUTES)
+MARKDOWN_ATTRIBUTES.setdefault('img', []).extend(['src', 'alt', 'title'])
+
+
+class HelperAttributeDict(dict):
+    def __init__(self, *args, **kwargs):
+        super(HelperAttributeDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self
+
+    def __getitem__(self, key):
+        try:
+            value = super(HelperAttributeDict, self).__getitem__(key)
+        except KeyError:
+            raise ckan.exceptions.HelperError(
+                'Helper \'{key}\' has not been defined.'.format(
+                    key=key
+                )
+            )
+        return value
+
+
+# Builtin helper functions.
+_builtin_functions = {}
+helper_functions = HelperAttributeDict()
+
+
+def core_helper(f, name=None):
+    """
+    Register a function as a builtin helper method.
+    """
+    def _get_name(func_or_class):
+        # Handles both methods and class instances.
+        try:
+            return func_or_class.__name__
+        except AttributeError:
+            return func_or_class.__class__.__name__
+
+    _builtin_functions[name or _get_name(f)] = f
+    return f
 
 
 def _datestamp_to_datetime(datetime_):
@@ -82,29 +126,12 @@ def _datestamp_to_datetime(datetime_):
     # all dates are considered UTC internally,
     # change output if `ckan.display_timezone` is available
     datetime_ = datetime_.replace(tzinfo=pytz.utc)
-    timezone_name = config.get('ckan.display_timezone', '')
-    if timezone_name == 'server':
-        local_tz = tzlocal.get_localzone()
-        return datetime_.astimezone(local_tz)
-
-    try:
-        datetime_ = datetime_.astimezone(
-            pytz.timezone(timezone_name)
-        )
-    except pytz.UnknownTimeZoneError:
-        if timezone_name != '':
-            log.warning(
-                'Timezone `%s` not found. '
-                'Please provide a valid timezone setting in '
-                '`ckan.display_timezone` or leave the field empty. All valid '
-                'values can be found in pytz.all_timezones. You can use the '
-                'special value `server` to use the local timezone of the '
-                'server.', timezone_name
-            )
+    datetime_ = datetime_.astimezone(get_display_timezone())
 
     return datetime_
 
 
+@core_helper
 def redirect_to(*args, **kw):
     '''Issue a redirect: return an HTTP response with a ``302 Moved`` header.
 
@@ -125,21 +152,51 @@ def redirect_to(*args, **kw):
 
         toolkit.redirect_to('dataset_read', id='changed')
 
+    If given a single string as argument, this redirects without url parsing
+
+        toolkit.redirect_to('http://example.com')
+        toolkit.redirect_to('/dataset')
+        toolkit.redirect_to('/some/other/path')
+
     '''
-    kw['__ckan_no_root'] = True
     if are_there_flash_messages():
         kw['__no_cache__'] = True
-    return _redirect_to(url_for(*args, **kw))
+
+    # Routes router doesn't like unicode args
+    uargs = map(lambda arg: str(arg) if isinstance(arg, unicode) else arg,
+                args)
+
+    _url = ''
+    skip_url_parsing = False
+    parse_url = kw.pop('parse_url', False)
+    if uargs and len(uargs) is 1 and isinstance(uargs[0], basestring) \
+            and (uargs[0].startswith('/') or is_url(uargs[0])) \
+            and parse_url is False:
+        skip_url_parsing = True
+        _url = uargs[0]
+
+    if skip_url_parsing is False:
+        _url = url_for(*uargs, **kw)
+
+    if _url.startswith('/'):
+        _url = str(config['ckan.site_url'].rstrip('/') + _url)
+
+    if is_flask_request():
+        return _flask_redirect(_url)
+    else:
+        return _routes_redirect_to(_url)
 
 
+@maintain.deprecated('h.url is deprecated please use h.url_for')
+@core_helper
 def url(*args, **kw):
-    '''Create url adding i18n information if selected
-    wrapper for pylons.url'''
-    locale = kw.pop('locale', None)
-    my_url = _pylons_default_url(*args, **kw)
-    return _add_i18n_to_url(my_url, locale=locale, **kw)
+    '''
+    Deprecated: please use `url_for` instead
+    '''
+    return url_for(*args, **kw)
 
 
+@core_helper
 def get_site_protocol_and_host():
     '''Return the protocol and host of the configured `ckan.site_url`.
     This is needed to generate valid, full-qualified URLs.
@@ -162,6 +219,7 @@ def get_site_protocol_and_host():
     return (None, None)
 
 
+@core_helper
 def url_for(*args, **kw):
     '''Return the URL for the given controller, action, id, etc.
 
@@ -182,6 +240,8 @@ def url_for(*args, **kw):
 
     '''
     locale = kw.pop('locale', None)
+    if locale and isinstance(locale, i18n.Locale):
+        locale = i18n.get_identifier_from_locale_class(locale)
     # remove __ckan_no_root and add after to not pollute url
     no_root = kw.pop('__ckan_no_root', False)
     # routes will get the wrong url for APIs if the ver is not provided
@@ -195,9 +255,10 @@ def url_for(*args, **kw):
         kw['protocol'], kw['host'] = get_site_protocol_and_host()
     my_url = _routes_default_url_for(*args, **kw)
     kw['__ckan_no_root'] = no_root
-    return _add_i18n_to_url(my_url, locale=locale, **kw)
+    return _local_url(my_url, locale=locale, **kw)
 
 
+@core_helper
 def url_for_static(*args, **kw):
     '''Returns the URL for static content that doesn't get translated (eg CSS)
 
@@ -214,6 +275,7 @@ def url_for_static(*args, **kw):
     return url_for_static_or_external(*args, **kw)
 
 
+@core_helper
 def url_for_static_or_external(*args, **kw):
     '''Returns the URL for static content that doesn't get translated (eg CSS),
     or external URLs
@@ -230,10 +292,13 @@ def url_for_static_or_external(*args, **kw):
 
     if args:
         args = (fix_arg(args[0]), ) + args[1:]
+    if kw.get('qualified', False):
+        kw['protocol'], kw['host'] = get_site_protocol_and_host()
     my_url = _routes_default_url_for(*args, **kw)
-    return my_url
+    return _local_url(my_url, locale='default', **kw)
 
 
+@core_helper
 def is_url(*args, **kw):
     '''
     Returns True if argument parses as a http, https or ftp URL
@@ -245,11 +310,14 @@ def is_url(*args, **kw):
     except ValueError:
         return False
 
-    valid_schemes = ('http', 'https', 'ftp')
-    return url.scheme in valid_schemes
+    default_valid_schemes = ('http', 'https', 'ftp')
+
+    valid_schemes = config.get('ckan.valid_url_schemes', '').lower().split()
+
+    return url.scheme in (valid_schemes or default_valid_schemes)
 
 
-def _add_i18n_to_url(url_to_amend, **kw):
+def _local_url(url_to_amend, **kw):
     # If the locale keyword param is provided then the url is rewritten
     # using that locale .If return_to is provided this is used as the url
     # (as part of the language changing feature).
@@ -270,10 +338,8 @@ def _add_i18n_to_url(url_to_amend, **kw):
             default_locale = request.environ.get('CKAN_LANG_IS_DEFAULT', True)
         except TypeError:
             default_locale = True
-    try:
-        root = request.environ.get('SCRIPT_NAME', '')
-    except TypeError:
-        root = ''
+
+    root = ''
     if kw.get('qualified', False):
         # if qualified is given we want the full url ie http://...
         protocol, host = get_site_protocol_and_host()
@@ -291,24 +357,21 @@ def _add_i18n_to_url(url_to_amend, **kw):
         if default_locale:
             root_path = re.sub('/{{LANG}}', '', root_path)
         else:
-            root_path = re.sub('{{LANG}}', locale, root_path)
+            root_path = re.sub('{{LANG}}', str(locale), root_path)
         # make sure we don't have a trailing / on the root
         if root_path[-1] == '/':
             root_path = root_path[:-1]
-
-        url_path = url_to_amend[len(root):]
-        url = '%s%s%s' % (root, root_path, url_path)
     else:
         if default_locale:
-            url = url_to_amend
+            root_path = ''
         else:
-            # we need to strip the root from the url and the add it before
-            # the language specification.
-            url = url_to_amend[len(root):]
-            url = '%s/%s%s' % (root, locale, url)
+            root_path = '/' + str(locale)
+
+    url_path = url_to_amend[len(root):]
+    url = '%s%s%s' % (root, root_path, url_path)
 
     # stop the root being added twice in redirects
-    if no_root:
+    if no_root and url_to_amend.startswith(root):
         url = url_to_amend[len(root):]
         if not default_locale:
             url = '/%s%s' % (locale, url)
@@ -320,6 +383,7 @@ def _add_i18n_to_url(url_to_amend, **kw):
     return url
 
 
+@core_helper
 def url_is_local(url):
     '''Returns True if url is local'''
     if not url or url.startswith('//'):
@@ -332,22 +396,37 @@ def url_is_local(url):
     return True
 
 
+@core_helper
 def full_current_url():
     ''' Returns the fully qualified current url (eg http://...) useful
     for sharing etc '''
     return (url_for(request.environ['CKAN_CURRENT_URL'], qualified=True))
 
 
+@core_helper
+def current_url():
+    ''' Returns current url unquoted'''
+    return urllib.unquote(request.environ['CKAN_CURRENT_URL'])
+
+
+@core_helper
 def lang():
     ''' Return the language code for the current locale eg `en` '''
     return request.environ.get('CKAN_LANG')
 
 
+@core_helper
+def ckan_version():
+    '''Return CKAN version'''
+    return ckan.__version__
+
+
+@core_helper
 def lang_native_name(lang=None):
     ''' Return the langage name currently used in it's localised form
         either from parameter or current environ setting'''
     lang = lang or lang()
-    locale = get_locales_dict().get(lang)
+    locale = i18n.get_locales_dict().get(lang)
     if locale:
         return locale.display_name or locale.english_name
     return lang
@@ -431,26 +510,31 @@ class _Flash(object):
     def are_there_messages(self):
         return bool(session.get(self.session_key))
 
+
 flash = _Flash()
 # this is here for backwards compatability
 _flash = flash
 
 
+@core_helper
 def flash_notice(message, allow_html=False):
     ''' Show a flash message of type notice '''
     flash(message, category='alert-info', allow_html=allow_html)
 
 
+@core_helper
 def flash_error(message, allow_html=False):
     ''' Show a flash message of type error '''
     flash(message, category='alert-error', allow_html=allow_html)
 
 
+@core_helper
 def flash_success(message, allow_html=False):
     ''' Show a flash message of type success '''
     flash(message, category='alert-success', allow_html=allow_html)
 
 
+@core_helper
 def are_there_flash_messages():
     ''' Returns True if there are flash messages for the current user '''
     return flash.are_there_messages()
@@ -459,7 +543,7 @@ def are_there_flash_messages():
 def _link_active(kwargs):
     ''' creates classes for the link_to calls '''
     highlight_actions = kwargs.get('highlight_actions',
-                                   kwargs.get('action', '')).split(' ')
+                                   kwargs.get('action', '')).split()
     return (c.controller == kwargs.get('controller')
             and c.action in highlight_actions)
 
@@ -484,18 +568,19 @@ def _link_to(text, *args, **kwargs):
         if kwargs.pop('inner_span', None):
             text = literal('<span>') + text + literal('</span>')
         if icon:
-            text = literal('<i class="icon-%s"></i> ' % icon) + text
+            text = literal('<i class="fa fa-%s"></i> ' % icon) + text
         return text
 
     icon = kwargs.pop('icon', None)
     class_ = _link_class(kwargs)
-    return link_to(
+    return tags.link_to(
         _create_link_text(text, **kwargs),
         url_for(*args, **kwargs),
         class_=class_
     )
 
 
+@core_helper
 def nav_link(text, *args, **kwargs):
     '''
     :param class_: pass extra class(es) to add to the ``<a>`` tag
@@ -506,7 +591,7 @@ def nav_link(text, *args, **kwargs):
     if len(args) > 1:
         raise Exception('Too many unnamed parameters supplied')
     if args:
-        kwargs['controller'] = controller
+        kwargs['controller'] = kwargs.get('controller')
         log.warning('h.nav_link() please supply controller as a named '
                     'parameter not a positional one')
     named_route = kwargs.pop('named_route', '')
@@ -520,6 +605,7 @@ def nav_link(text, *args, **kwargs):
     return link
 
 
+@core_helper
 @maintain.deprecated('h.nav_named_link is deprecated please '
                      'use h.nav_link\nNOTE: you will need to pass the '
                      'route_name as a named parameter')
@@ -529,6 +615,7 @@ def nav_named_link(text, named_route, **kwargs):
     return nav_link(text, named_route=named_route, **kwargs)
 
 
+@core_helper
 @maintain.deprecated('h.subnav_link is deprecated please '
                      'use h.nav_link\nNOTE: if action is passed as the second '
                      'parameter make sure it is passed as a named parameter '
@@ -540,6 +627,7 @@ def subnav_link(text, action, **kwargs):
     return nav_link(text, **kwargs)
 
 
+@core_helper
 @maintain.deprecated('h.subnav_named_route is deprecated please '
                      'use h.nav_link\nNOTE: you will need to pass the '
                      'route_name as a named parameter')
@@ -549,6 +637,7 @@ def subnav_named_route(text, named_route, **kwargs):
     return nav_link(text, named_route=named_route, **kwargs)
 
 
+@core_helper
 def build_nav_main(*args):
     ''' build a set of menu items.
 
@@ -564,6 +653,7 @@ def build_nav_main(*args):
     return output
 
 
+@core_helper
 def build_nav_icon(menu_item, title, **kw):
     '''Build a navigation item used for example in ``user/read_base.html``.
 
@@ -582,10 +672,11 @@ def build_nav_icon(menu_item, title, **kw):
     return _make_menu_item(menu_item, title, **kw)
 
 
+@core_helper
 def build_nav(menu_item, title, **kw):
     '''Build a navigation item used for example breadcrumbs.
 
-    Outputs ``<li><a href="..."></i> title</a></li>``.
+    Outputs ``<li><a href="...">title</a></li>``.
 
     :param menu_item: the name of the defined menu item defined in
       config/routing as the named route of the same name
@@ -600,6 +691,7 @@ def build_nav(menu_item, title, **kw):
     return _make_menu_item(menu_item, title, icon=None, **kw)
 
 
+@core_helper
 def build_extra_admin_nav():
     '''Build extra navigation items used in ``admin/base.html`` for values
     defined in the config option ``ckan.admin_tabs``. Typically this is
@@ -649,10 +741,12 @@ def _make_menu_item(menu_item, title, **kw):
     return literal('<li>') + link + literal('</li>')
 
 
+@core_helper
 def default_group_type():
     return str(config.get('ckan.default.group_type', 'group'))
 
 
+@core_helper
 def get_facet_items_dict(facet, limit=None, exclude_active=False):
     '''Return the list of unselected facet items for the given facet, sorted
     by count.
@@ -684,7 +778,8 @@ def get_facet_items_dict(facet, limit=None, exclude_active=False):
             facets.append(dict(active=False, **facet_item))
         elif not exclude_active:
             facets.append(dict(active=True, **facet_item))
-    facets = sorted(facets, key=lambda item: item['count'], reverse=True)
+    # Sort descendingly by count and ascendingly by case-sensitive display name
+    facets.sort(key=lambda it: (-it['count'], it['display_name'].lower()))
     if c.search_facets_limits and limit is None:
         limit = c.search_facets_limits.get(facet)
     # zero treated as infinite for hysterical raisins
@@ -693,6 +788,7 @@ def get_facet_items_dict(facet, limit=None, exclude_active=False):
     return facets
 
 
+@core_helper
 def has_more_facets(facet, limit=None, exclude_active=False):
     '''
     Returns True if there are more facet items for the given facet than the
@@ -723,6 +819,7 @@ def has_more_facets(facet, limit=None, exclude_active=False):
     return False
 
 
+@core_helper
 def unselected_facet_items(facet, limit=10):
     '''Return the list of unselected facet items for the given facet, sorted
     by count.
@@ -744,6 +841,7 @@ def unselected_facet_items(facet, limit=10):
     return get_facet_items_dict(facet, limit=limit, exclude_active=True)
 
 
+@core_helper
 @maintain.deprecated('h.get_facet_title is deprecated in 2.0 and will be '
                      'removed.')
 def get_facet_title(name):
@@ -761,6 +859,7 @@ def get_facet_title(name):
     return facet_titles.get(name, name.capitalize())
 
 
+@core_helper
 def get_param_int(name, default=10):
     try:
         return int(request.params.get(name, default))
@@ -781,6 +880,7 @@ def _search_url(params):
     return _url_with_params(url, params)
 
 
+@core_helper
 def sorted_extras(package_extras, auto_clean=False, subs=None, exclude=None):
     ''' Used for outputting package extras
 
@@ -796,7 +896,7 @@ def sorted_extras(package_extras, auto_clean=False, subs=None, exclude=None):
 
     # If exclude is not supplied use values defined in the config
     if not exclude:
-        exclude = g.package_hide_extras
+        exclude = config.get('package_hide_extras', [])
     output = []
     for extra in sorted(package_extras, key=lambda x: x['key']):
         if extra.get('state') == 'deleted':
@@ -814,9 +914,10 @@ def sorted_extras(package_extras, auto_clean=False, subs=None, exclude=None):
     return output
 
 
+@core_helper
 def check_access(action, data_dict=None):
     context = {'model': model,
-               'user': c.user or c.author}
+               'user': c.user}
     if not data_dict:
         data_dict = {}
     try:
@@ -828,6 +929,7 @@ def check_access(action, data_dict=None):
     return authorized
 
 
+@core_helper
 @maintain.deprecated("helpers.get_action() is deprecated and will be removed "
                      "in a future version of CKAN. Instead, please use the "
                      "extra_vars param to render() in your controller to pass "
@@ -839,6 +941,7 @@ def get_action(action_name, data_dict=None):
     return logic.get_action(action_name)({}, data_dict)
 
 
+@core_helper
 def linked_user(user, maxlength=0, avatar=20):
     if not isinstance(user, model.User):
         user_name = unicode(user)
@@ -847,15 +950,24 @@ def linked_user(user, maxlength=0, avatar=20):
             return user_name
     if user:
         name = user.name if model.User.VALID_NAME.match(user.name) else user.id
-        icon = gravatar(email_hash=user.email_hash, size=avatar)
         displayname = user.display_name
+
         if maxlength and len(user.display_name) > maxlength:
             displayname = displayname[:maxlength] + '...'
-        return icon + u' ' + \
-            link_to(displayname,
-                    url_for(controller='user', action='read', id=name))
+
+        return tags.literal(u'{icon} {link}'.format(
+            icon=gravatar(
+                email_hash=user.email_hash,
+                size=avatar
+            ),
+            link=tags.link_to(
+                displayname,
+                url_for(controller='user', action='read', id=name)
+            )
+        ))
 
 
+@core_helper
 def group_name_to_title(name):
     group = model.Group.by_name(name)
     if group is not None:
@@ -863,6 +975,7 @@ def group_name_to_title(name):
     return name
 
 
+@core_helper
 def markdown_extract(text, extract_length=190):
     ''' return the plain text representation of markdown encoded text.  That
     is the texted without any html tags.  If extract_length is 0 then it
@@ -872,14 +985,25 @@ def markdown_extract(text, extract_length=190):
     plain = RE_MD_HTML_TAGS.sub('', markdown(text))
     if not extract_length or len(plain) < extract_length:
         return literal(plain)
-    return literal(unicode(truncate(plain, length=extract_length,
-                                    indicator='...', whole_word=True)))
+
+    return literal(
+        unicode(
+            whtext.truncate(
+                plain,
+                length=extract_length,
+                indicator='...',
+                whole_word=True
+            )
+        )
+    )
 
 
+@core_helper
 def icon_url(name):
     return url_for_static('/images/icons/%s.png' % name)
 
 
+@core_helper
 def icon_html(url, alt=None, inline=True):
     classes = ''
     if inline:
@@ -888,10 +1012,12 @@ def icon_html(url, alt=None, inline=True):
                     'class="%s" /> ') % (url, alt, classes))
 
 
+@core_helper
 def icon(name, alt=None, inline=True):
     return icon_html(icon_url(name), alt, inline)
 
 
+@core_helper
 def resource_icon(res):
     if False:
         icon_name = 'page_white'
@@ -903,6 +1029,7 @@ def resource_icon(res):
         return icon(format_icon(res.get('format', '')))
 
 
+@core_helper
 def format_icon(_format):
     _format = _format.lower()
     if ('json' in _format):
@@ -922,6 +1049,7 @@ def format_icon(_format):
     return 'page_white'
 
 
+@core_helper
 def dict_list_reduce(list_, key, unique=True):
     ''' Take a list of dicts and create a new one containing just the
     values for the key with unique values if requested. '''
@@ -934,6 +1062,7 @@ def dict_list_reduce(list_, key, unique=True):
     return new_list
 
 
+@core_helper
 def linked_gravatar(email_hash, size=100, default=None):
     return literal(
         '<a href="https://gravatar.com/" target="_blank" ' +
@@ -941,10 +1070,12 @@ def linked_gravatar(email_hash, size=100, default=None):
         '%s</a>' % gravatar(email_hash, size, default)
     )
 
+
 _VALID_GRAVATAR_DEFAULTS = ['404', 'mm', 'identicon', 'monsterid',
                             'wavatar', 'retro']
 
 
+@core_helper
 def gravatar(email_hash, size=100, default=None):
     if default is None:
         default = config.get('ckan.gravatar_default', 'identicon')
@@ -954,11 +1085,12 @@ def gravatar(email_hash, size=100, default=None):
         default = urllib.quote(default, safe='')
 
     return literal('''<img src="//gravatar.com/avatar/%s?s=%d&amp;d=%s"
-        class="gravatar" width="%s" height="%s" />'''
+        class="gravatar" width="%s" height="%s" alt="" />'''
                    % (email_hash, size, default, size, size)
                    )
 
 
+@core_helper
 def pager_url(page, partial=None, **kwargs):
     routes_dict = _pylons_default_url.environ['pylons.routes_dict']
     kwargs['controller'] = routes_dict['controller']
@@ -966,7 +1098,7 @@ def pager_url(page, partial=None, **kwargs):
     if routes_dict.get('id'):
         kwargs['id'] = routes_dict['id']
     kwargs['page'] = page
-    return url(**kwargs)
+    return url_for(**kwargs)
 
 
 class Page(paginate.Page):
@@ -1008,6 +1140,43 @@ class Page(paginate.Page):
         return re.sub(current_page_span, current_page_link, html)
 
 
+@core_helper
+def get_page_number(params, key='page', default=1):
+    '''
+    Return the page number from the provided params after verifying that it is
+    an positive integer.
+
+    If it fails it will abort the request with a 400 error.
+    '''
+    p = params.get(key, default)
+
+    try:
+        p = int(p)
+        if p < 1:
+            raise ValueError("Negative number not allowed")
+    except ValueError:
+        import ckan.lib.base as base
+        base.abort(400, ('"{key}" parameter must be a positive integer'
+                   .format(key=key)))
+
+    return p
+
+
+@core_helper
+def get_display_timezone():
+    ''' Returns a pytz timezone for the display_timezone setting in the
+    configuration file or UTC if not specified.
+    :rtype: timezone
+    '''
+    timezone_name = config.get('ckan.display_timezone') or 'utc'
+
+    if timezone_name == 'server':
+        return tzlocal.get_localzone()
+
+    return pytz.timezone(timezone_name)
+
+
+@core_helper
 def render_datetime(datetime_, date_format=None, with_hours=False):
     '''Render a datetime object or timestamp string as a localised date or
     in the requested format.
@@ -1028,12 +1197,31 @@ def render_datetime(datetime_, date_format=None, with_hours=False):
 
     # if date_format was supplied we use it
     if date_format:
+
+        # See http://bugs.python.org/issue1777412
+        if datetime_.year < 1900:
+            year = str(datetime_.year)
+
+            date_format = re.sub('(?<!%)((%%)*)%y',
+                                 r'\g<1>{year}'.format(year=year[-2:]),
+                                 date_format)
+            date_format = re.sub('(?<!%)((%%)*)%Y',
+                                 r'\g<1>{year}'.format(year=year),
+                                 date_format)
+
+            datetime_ = datetime.datetime(2016, datetime_.month, datetime_.day,
+                                          datetime_.hour, datetime_.minute,
+                                          datetime_.second)
+
+            return datetime_.strftime(date_format)
+
         return datetime_.strftime(date_format)
     # the localised date
     return formatters.localised_nice_date(datetime_, show_date=True,
                                           with_hours=with_hours)
 
 
+@core_helper
 def date_str_to_datetime(date_str):
     '''Convert ISO-like formatted datestring to datetime object.
 
@@ -1066,6 +1254,7 @@ def date_str_to_datetime(date_str):
     return datetime.datetime(*map(int, time_tuple))
 
 
+@core_helper
 def parse_rfc_2822_date(date_str, assume_utc=True):
     '''
     Parse a date string of the form specified in RFC 2822, and return a
@@ -1134,6 +1323,7 @@ class _RFC2282TzInfo(datetime.tzinfo):
         return None
 
 
+@core_helper
 @maintain.deprecated('h.time_ago_in_words_from_str is deprecated in 2.2 '
                      'and will be removed.  Please use '
                      'h.time_ago_from_timestamp instead')
@@ -1146,6 +1336,7 @@ def time_ago_in_words_from_str(date_str, granularity='month'):
         return _('Unknown')
 
 
+@core_helper
 def time_ago_from_timestamp(timestamp):
     ''' Returns a string like `5 months ago` for a datetime relative to now
     :param timestamp: the timestamp or datetime
@@ -1161,36 +1352,42 @@ def time_ago_from_timestamp(timestamp):
     return formatters.localised_nice_date(datetime_, show_date=False)
 
 
+@core_helper
 def button_attr(enable, type='primary'):
     if enable:
         return 'class="btn %s"' % type
     return 'disabled class="btn disabled"'
 
 
+@core_helper
 def dataset_display_name(package_or_package_dict):
     if isinstance(package_or_package_dict, dict):
-        return package_or_package_dict.get('title', '') or \
-            package_or_package_dict.get('name', '')
+        return get_translated(package_or_package_dict, 'title') or \
+            package_or_package_dict['name']
     else:
+        # FIXME: we probably shouldn't use the same functions for
+        # package dicts and real package objects
         return package_or_package_dict.title or package_or_package_dict.name
 
 
+@core_helper
 def dataset_link(package_or_package_dict):
     if isinstance(package_or_package_dict, dict):
         name = package_or_package_dict['name']
     else:
         name = package_or_package_dict.name
     text = dataset_display_name(package_or_package_dict)
-    return link_to(
+    return tags.link_to(
         text,
         url_for(controller='package', action='read', id=name)
     )
 
 
-# TODO: (?) support resource objects as well
+@core_helper
 def resource_display_name(resource_dict):
-    name = resource_dict.get('name', None)
-    description = resource_dict.get('description', None)
+    # TODO: (?) support resource objects as well
+    name = get_translated(resource_dict, 'name')
+    description = get_translated(resource_dict, 'description')
     if name:
         return name
     elif description:
@@ -1203,49 +1400,41 @@ def resource_display_name(resource_dict):
         return _("Unnamed resource")
 
 
+@core_helper
 def resource_link(resource_dict, package_id):
     text = resource_display_name(resource_dict)
     url = url_for(controller='package',
                   action='resource_read',
                   id=package_id,
                   resource_id=resource_dict['id'])
-    return link_to(text, url)
+    return tags.link_to(text, url)
 
 
-def related_item_link(related_item_dict):
-    text = related_item_dict.get('title', '')
-    url = url_for(controller='related',
-                  action='read',
-                  id=related_item_dict['id'])
-    return link_to(text, url)
-
-
+@core_helper
 def tag_link(tag):
     url = url_for(controller='tag', action='read', id=tag['name'])
-    return link_to(tag.get('title', tag['name']), url)
+    return tags.link_to(tag.get('title', tag['name']), url)
 
 
+@core_helper
 def group_link(group):
     url = url_for(controller='group', action='read', id=group['name'])
-    return link_to(group['title'], url)
+    return tags.link_to(group['title'], url)
 
 
+@core_helper
 def organization_link(organization):
     url = url_for(controller='organization', action='read',
                   id=organization['name'])
-    return link_to(organization['name'], url)
+    return tags.link_to(organization['name'], url)
 
 
+@core_helper
 def dump_json(obj, **kw):
     return json.dumps(obj, **kw)
 
 
-def _get_template_name():
-    # FIX ME THIS IS BROKEN
-    ''' helper function to get the currently/last rendered template name '''
-    return c.__debug_info[-1]['template_name']
-
-
+@core_helper
 def auto_log_message():
     if (c.action == 'new'):
         return _('Created new dataset.')
@@ -1256,6 +1445,7 @@ def auto_log_message():
     return ''
 
 
+@core_helper
 def activity_div(template, activity, actor, object=None, target=None):
     actor = '<span class="actor">%s</span>' % actor
     if object:
@@ -1270,6 +1460,7 @@ def activity_div(template, activity, actor, object=None, target=None):
     return literal(template)
 
 
+@core_helper
 def snippet(template_name, **kw):
     ''' This function is used to load html snippets into pages. keywords
     can be used to pass parameters into the snippet rendering '''
@@ -1277,6 +1468,7 @@ def snippet(template_name, **kw):
     return base.render_snippet(template_name, **kw)
 
 
+@core_helper
 def convert_to_dict(object_type, objs):
     ''' This is a helper function for converting lists of objects into
     lists of dicts. It is for backwards compatability only. '''
@@ -1309,10 +1501,12 @@ def convert_to_dict(object_type, objs):
         items.append(item)
     return items
 
+
 # these are the types of objects that can be followed
 _follow_objects = ['dataset', 'user', 'group']
 
 
+@core_helper
 def follow_button(obj_type, obj_id):
     '''Return a follow button for the given object type and id.
 
@@ -1343,6 +1537,7 @@ def follow_button(obj_type, obj_id):
     return ''
 
 
+@core_helper
 def follow_count(obj_type, obj_id):
     '''Return the number of followers of an object.
 
@@ -1377,6 +1572,7 @@ def _create_url_with_params(params=None, controller=None, action=None,
     return _url_with_params(url, params)
 
 
+@core_helper
 def add_url_param(alternative_url=None, controller=None, action=None,
                   extras=None, new_params=None):
     '''
@@ -1400,6 +1596,7 @@ def add_url_param(alternative_url=None, controller=None, action=None,
                                    action=action, extras=extras)
 
 
+@core_helper
 def remove_url_param(key, value=None, replace=None, controller=None,
                      action=None, extras=None, alternative_url=None):
     ''' Remove one or multiple keys from the current parameters.
@@ -1441,11 +1638,13 @@ def remove_url_param(key, value=None, replace=None, controller=None,
                                    action=action, extras=extras)
 
 
+@core_helper
 def include_resource(resource):
     r = getattr(fanstatic_resources, resource)
     r.need()
 
 
+@core_helper
 def urls_for_resource(resource):
     ''' Returns a list of urls for the resource specified.  If the resource
     is a group or has dependencies then there can be multiple urls.
@@ -1475,44 +1674,13 @@ def urls_for_resource(resource):
     return out
 
 
+@core_helper
 def debug_inspect(arg):
     ''' Output pprint.pformat view of supplied arg '''
     return literal('<pre>') + pprint.pformat(arg) + literal('</pre>')
 
 
-def debug_full_info_as_list(debug_info):
-    ''' This dumps the template variables for debugging purposes only. '''
-    out = []
-    ignored_keys = ['c', 'app_globals', 'g', 'h', 'request', 'tmpl_context',
-                    'actions', 'translator', 'session', 'N_', 'ungettext',
-                    'config', 'response', '_']
-    ignored_context_keys = ['__class__', '__context', '__delattr__',
-                            '__dict__',
-                            '__doc__', '__format__', '__getattr__',
-                            '__getattribute__', '__hash__', '__init__',
-                            '__module__', '__new__', '__reduce__',
-                            '__reduce_ex__', '__repr__', '__setattr__',
-                            '__sizeof__', '__str__', '__subclasshook__',
-                            '__weakref__', 'action', 'environ', 'pylons',
-                            'start_response']
-    debug_vars = debug_info['vars']
-    for key in debug_vars.keys():
-        if key not in ignored_keys:
-            data = pprint.pformat(debug_vars.get(key))
-            data = data.decode('utf-8')
-            out.append((key, data))
-
-    if 'tmpl_context' in debug_vars:
-        for key in debug_info['c_vars']:
-
-            if key not in ignored_context_keys:
-                data = pprint.pformat(getattr(debug_vars['tmpl_context'], key))
-                data = data.decode('utf-8')
-                out.append(('c.%s' % key, data))
-
-    return out
-
-
+@core_helper
 def popular(type_, number, min=1, title=None):
     ''' display a popular icon. '''
     if type_ == 'views':
@@ -1526,6 +1694,7 @@ def popular(type_, number, min=1, title=None):
                    title=title, number=number, min=min)
 
 
+@core_helper
 def groups_available(am_member=False):
     '''Return a list of the groups that the user is authorized to edit.
 
@@ -1541,15 +1710,26 @@ def groups_available(am_member=False):
     return logic.get_action('group_list_authz')(context, data_dict)
 
 
-def organizations_available(permission='edit_group'):
+@core_helper
+def organizations_available(
+        permission='manage_group', include_dataset_count=False):
     '''Return a list of organizations that the current user has the specified
     permission for.
     '''
     context = {'user': c.user}
-    data_dict = {'permission': permission}
+    data_dict = {
+        'permission': permission,
+        'include_dataset_count': include_dataset_count}
     return logic.get_action('organization_list_for_user')(context, data_dict)
 
 
+@core_helper
+def roles_translated():
+    '''Return a dict of available roles with their translations'''
+    return authz.roles_trans()
+
+
+@core_helper
 def user_in_org_or_group(group_id):
     ''' Check if user is in a group or organization '''
     # we need a user
@@ -1566,6 +1746,7 @@ def user_in_org_or_group(group_id):
     return len(query.all()) != 0
 
 
+@core_helper
 def dashboard_activity_stream(user_id, filter_type=None, filter_id=None,
                               offset=0):
     '''Return the dashboard activity stream of the current user.
@@ -1599,6 +1780,7 @@ def dashboard_activity_stream(user_id, filter_type=None, filter_id=None,
             context, {'offset': offset})
 
 
+@core_helper
 def recently_changed_packages_activity_stream(limit=None):
     if limit:
         data_dict = {'limit': limit}
@@ -1609,6 +1791,7 @@ def recently_changed_packages_activity_stream(limit=None):
         context, data_dict)
 
 
+@core_helper
 def escape_js(str_to_escape):
     '''Escapes special characters from a JS string.
 
@@ -1622,6 +1805,7 @@ def escape_js(str_to_escape):
         .replace('"', '\\\"')
 
 
+@core_helper
 def get_pkg_dict_extra(pkg_dict, key, default=None):
     '''Returns the value for the dataset extra with the provided key.
 
@@ -1642,11 +1826,13 @@ def get_pkg_dict_extra(pkg_dict, key, default=None):
     return default
 
 
+@core_helper
 def get_request_param(parameter_name, default=None):
     ''' This function allows templates to access query string parameters
     from the request. This is useful for things like sort order in
     searches. '''
     return request.params.get(parameter_name, default)
+
 
 # find all inner text of html eg `<b>moo</b>` gets `moo` but not of <a> tags
 # as this would lead to linkifying links if they are urls.
@@ -1675,13 +1861,17 @@ RE_MD_EXTERNAL_LINK = re.compile(
 RE_MD_HTML_TAGS = re.compile('<[^><]*>')
 
 
+@core_helper
 def html_auto_link(data):
     '''Linkifies HTML
 
-    tag:... converted to a tag link
-    dataset:... converted to a dataset link
-    group:... converted to a group link
-    http://... converted to a link
+    `tag` converted to a tag link
+
+    `dataset` converted to a dataset link
+
+    `group` converted to a group link
+
+    `http://` converted to a link
     '''
 
     LINK_FNS = {
@@ -1711,6 +1901,7 @@ def html_auto_link(data):
     return data
 
 
+@core_helper
 def render_markdown(data, auto_link=True, allow_html=False):
     ''' Returns the data as rendered markdown
 
@@ -1727,7 +1918,9 @@ def render_markdown(data, auto_link=True, allow_html=False):
         data = markdown(data.strip())
     else:
         data = RE_MD_HTML_TAGS.sub('', data.strip())
-        data = markdown(clean_html(data, strip=True))
+        data = clean_html(
+            markdown(data), strip=True,
+            tags=MARKDOWN_TAGS, attributes=MARKDOWN_ATTRIBUTES)
     # tags can be added by tag:... or tag:"...." and a link will be made
     # from it
     if auto_link:
@@ -1735,6 +1928,7 @@ def render_markdown(data, auto_link=True, allow_html=False):
     return literal(data)
 
 
+@core_helper
 def format_resource_items(items):
     ''' Take a resource item list and format nicely with blacklisting etc. '''
     blacklist = ['name', 'description', 'url', 'tracking_summary']
@@ -1763,13 +1957,15 @@ def format_resource_items(items):
                 value = formatters.localised_number(float(value))
             elif re.search(reg_ex_int, value):
                 value = formatters.localised_number(int(value))
-        elif isinstance(value, int) or isinstance(value, float):
+        elif ((isinstance(value, int) or isinstance(value, float))
+                and value not in (True, False)):
             value = formatters.localised_number(value)
         key = key.replace('_', ' ')
         output.append((key, value))
     return sorted(output, key=lambda x: x[0])
 
 
+@core_helper
 def resource_preview(resource, package):
     '''
     Returns a rendered snippet for a embedded resource preview.
@@ -1799,6 +1995,7 @@ def resource_preview(resource, package):
                    raw_resource_url=resource.get('url'))
 
 
+@core_helper
 def get_allowed_view_types(resource, package):
     data_dict = {'resource': resource, 'package': package}
     plugins = datapreview.get_allowed_view_plugins(data_dict)
@@ -1813,6 +2010,7 @@ def get_allowed_view_types(resource, package):
     return allowed_view_types
 
 
+@core_helper
 def rendered_resource_view(resource_view, resource, package, embed=False):
     '''
     Returns a rendered resource view snippet.
@@ -1833,6 +2031,7 @@ def rendered_resource_view(resource_view, resource, package, embed=False):
     return literal(base.render(template, extra_vars=data_dict))
 
 
+@core_helper
 def view_resource_url(resource_view, resource, package, **kw):
     '''
     Returns url for resource. made to be overridden by extensions. i.e
@@ -1841,6 +2040,7 @@ def view_resource_url(resource_view, resource, package, **kw):
     return resource['url']
 
 
+@core_helper
 def resource_view_is_filterable(resource_view):
     '''
     Returns True if the given resource view support filters.
@@ -1849,6 +2049,7 @@ def resource_view_is_filterable(resource_view):
     return view_plugin.info().get('filterable', False)
 
 
+@core_helper
 def resource_view_get_fields(resource):
     '''Returns sorted list of text and time fields of a datastore resource.'''
 
@@ -1866,6 +2067,7 @@ def resource_view_get_fields(resource):
     return sorted(fields)
 
 
+@core_helper
 def resource_view_is_iframed(resource_view):
     '''
     Returns true if the given resource view should be displayed in an iframe.
@@ -1874,6 +2076,7 @@ def resource_view_is_iframed(resource_view):
     return view_plugin.info().get('iframed', True)
 
 
+@core_helper
 def resource_view_icon(resource_view):
     '''
     Returns the icon for a particular view type.
@@ -1882,6 +2085,7 @@ def resource_view_icon(resource_view):
     return view_plugin.info().get('icon', 'picture')
 
 
+@core_helper
 def resource_view_display_preview(resource_view):
     '''
     Returns if the view should display a preview.
@@ -1890,6 +2094,7 @@ def resource_view_display_preview(resource_view):
     return view_plugin.info().get('preview_enabled', True)
 
 
+@core_helper
 def resource_view_full_page(resource_view):
     '''
     Returns if the edit view page should be full page.
@@ -1898,11 +2103,13 @@ def resource_view_full_page(resource_view):
     return view_plugin.info().get('full_page_edit', False)
 
 
+@core_helper
 def remove_linebreaks(string):
     '''Remove linebreaks from string to make it usable in JavaScript'''
     return unicode(string).replace('\n', '')
 
 
+@core_helper
 def list_dict_filter(list_, search_field, output_field, value):
     ''' Takes a list of dicts and returns the value of a given key if the
     item has a matching value for a supplied key
@@ -1925,6 +2132,7 @@ def list_dict_filter(list_, search_field, output_field, value):
     return value
 
 
+@core_helper
 def SI_number_span(number):
     ''' outputs a span with the number in SI unit eg 14700 -> 14.7k '''
     number = int(number)
@@ -1935,6 +2143,7 @@ def SI_number_span(number):
                          + '">')
     return output + formatters.localised_SI_number(number) + literal('</span>')
 
+
 # add some formatter functions
 localised_number = formatters.localised_number
 localised_SI_number = formatters.localised_SI_number
@@ -1942,6 +2151,7 @@ localised_nice_date = formatters.localised_nice_date
 localised_filesize = formatters.localised_filesize
 
 
+@core_helper
 def new_activities():
     '''Return the number of activities for the current user.
 
@@ -1955,12 +2165,14 @@ def new_activities():
     return action({}, {})
 
 
+@core_helper
 def uploads_enabled():
     if uploader.get_storage_path():
         return True
     return False
 
 
+@core_helper
 def get_featured_organizations(count=1):
     '''Returns a list of favourite organization in the form
     of organization_list action function
@@ -1973,6 +2185,7 @@ def get_featured_organizations(count=1):
     return orgs
 
 
+@core_helper
 def get_featured_groups(count=1):
     '''Returns a list of favourite group the form
     of organization_list action function
@@ -1985,6 +2198,7 @@ def get_featured_groups(count=1):
     return groups
 
 
+@core_helper
 def featured_group_org(items, get_action, list_action, count):
     def get_group(id):
         context = {'ignore_auth': True,
@@ -2020,6 +2234,7 @@ def featured_group_org(items, get_action, list_action, count):
     return groups_data
 
 
+@core_helper
 def get_site_statistics():
     stats = {}
     stats['dataset_count'] = logic.get_action('package_search')(
@@ -2027,17 +2242,13 @@ def get_site_statistics():
     stats['group_count'] = len(logic.get_action('group_list')({}, {}))
     stats['organization_count'] = len(
         logic.get_action('organization_list')({}, {}))
-    result = model.Session.execute(
-        '''select count(*) from related r
-           left join related_dataset rd on r.id = rd.related_id
-           where rd.status = 'active' or rd.id is null''').first()[0]
-    stats['related_count'] = result
-
     return stats
+
 
 _RESOURCE_FORMATS = None
 
 
+@core_helper
 def resource_formats():
     ''' Returns the resource formats as a dict, sourced from the resource
     format JSON file.
@@ -2084,6 +2295,7 @@ def resource_formats():
     return _RESOURCE_FORMATS
 
 
+@core_helper
 def unified_resource_format(format):
     formats = resource_formats()
     format_clean = format.lower()
@@ -2094,10 +2306,12 @@ def unified_resource_format(format):
     return format_new
 
 
+@core_helper
 def check_config_permission(permission):
     return authz.check_config_permission(permission)
 
 
+@core_helper
 def get_organization(org=None, include_datasets=False):
     if org is None:
         return {}
@@ -2108,6 +2322,7 @@ def get_organization(org=None, include_datasets=False):
         return {}
 
 
+@core_helper
 def license_options(existing_license_id=None):
     '''Returns [(l.title, l.id), ...] for the licenses configured to be
     offered. Always includes the existing_license_id, if supplied.
@@ -2123,123 +2338,76 @@ def license_options(existing_license_id=None):
         for license_id in license_ids]
 
 
-# these are the functions that will end up in `h` template helpers
-__allowed_functions__ = [
-    # functions defined in ckan.lib.helpers
-    'redirect_to',
-    'url',
-    'url_for',
-    'url_for_static',
-    'url_for_static_or_external',
-    'is_url',
-    'lang',
-    'flash',
-    'flash_error',
-    'flash_notice',
-    'flash_success',
-    'nav_link',
-    'nav_named_link',
-    'subnav_link',
-    'subnav_named_route',
-    'default_group_type',
-    'check_access',
-    'get_action',
-    'linked_user',
-    'group_name_to_title',
-    'markdown_extract',
-    'icon',
-    'icon_html',
-    'icon_url',
-    'resource_icon',
-    'format_icon',
-    'linked_gravatar',
-    'gravatar',
-    'pager_url',
-    'render_datetime',
-    'date_str_to_datetime',
-    'parse_rfc_2822_date',
-    'time_ago_in_words_from_str',
-    'button_attr',
-    'dataset_display_name',
-    'dataset_link',
-    'resource_display_name',
-    'resource_link',
-    'related_item_link',
-    'tag_link',
-    'group_link',
-    'dump_json',
-    'auto_log_message',
-    'snippet',
-    'convert_to_dict',
-    'activity_div',
-    'lang_native_name',
-    'get_facet_items_dict',
-    'unselected_facet_items',
-    'include_resource',
-    'urls_for_resource',
-    'build_nav_main',
-    'build_nav_icon',
-    'build_nav',
-    'build_extra_admin_nav',
-    'debug_inspect',
-    'dict_list_reduce',
-    'full_current_url',
-    'popular',
-    'debug_full_info_as_list',
-    'get_facet_title',
-    'get_param_int',
-    'sorted_extras',
-    'follow_button',
-    'follow_count',
-    'remove_url_param',
-    'add_url_param',
-    'groups_available',
-    'organizations_available',
-    'user_in_org_or_group',
-    'dashboard_activity_stream',
-    'recently_changed_packages_activity_stream',
-    'escape_js',
-    'get_pkg_dict_extra',
-    'get_request_param',
-    'render_markdown',
-    'format_resource_items',
-    'resource_preview',
-    'rendered_resource_view',
-    'resource_view_get_fields',
-    'resource_view_is_filterable',
-    'resource_view_is_iframed',
-    'resource_view_icon',
-    'resource_view_display_preview',
-    'resource_view_full_page',
-    'remove_linebreaks',
-    'SI_number_span',
-    'localised_number',
-    'localised_SI_number',
-    'localised_nice_date',
-    'localised_filesize',
-    'list_dict_filter',
-    'new_activities',
-    'time_ago_from_timestamp',
-    'get_organization',
-    'has_more_facets',
-    # imported into ckan.lib.helpers
-    'literal',
-    'link_to',
-    'get_available_locales',
-    'get_locales_dict',
-    'truncate',
-    'file',
-    'mail_to',
-    'radio',
-    'submit',
-    'asbool',
-    'uploads_enabled',
-    'get_featured_organizations',
-    'get_featured_groups',
-    'get_site_statistics',
-    'get_allowed_view_types',
-    'urlencode',
-    'check_config_permission',
-    'view_resource_url',
-    'license_options',
-]
+@core_helper
+def get_translated(data_dict, field):
+    language = i18n.get_lang()
+    try:
+        return data_dict[field + u'_translated'][language]
+    except KeyError:
+        val = data_dict.get(field, '')
+        return _(val) if val and isinstance(val, basestring) else val
+
+
+@core_helper
+def facets():
+    u'''Returns a list of the current facet names'''
+    return config.get(u'search.facets', DEFAULT_FACET_NAMES).split()
+
+
+@core_helper
+def mail_to(email_address, name):
+    email = escape(email_address)
+    author = escape(name)
+    html = Markup(u'<a href=mailto:{0}>{1}</a>'.format(email, author))
+    return html
+
+
+@core_helper
+def radio(selected, id, checked):
+    if checked:
+        return literal((u'<input checked="checked" id="%s_%s" name="%s" \
+            value="%s" type="radio">') % (selected, id, selected, id))
+    return literal(('<input id="%s_%s" name="%s" \
+        value="%s" type="radio">') % (selected, id, selected, id))
+
+
+core_helper(flash, name='flash')
+core_helper(localised_number)
+core_helper(localised_SI_number)
+core_helper(localised_nice_date)
+core_helper(localised_filesize)
+# Useful additionsfrom the i18n library.
+core_helper(i18n.get_available_locales)
+core_helper(i18n.get_locales_dict)
+# Useful additions from the webhelpers library.
+core_helper(tags.literal)
+core_helper(tags.link_to)
+core_helper(tags.file)
+core_helper(tags.submit)
+core_helper(whtext.truncate)
+# Useful additions from the paste library.
+core_helper(converters.asbool)
+# Useful additions from the stdlib.
+core_helper(urlencode)
+core_helper(clean_html, name='clean_html')
+
+
+def load_plugin_helpers():
+    """
+    (Re)loads the list of helpers provided by plugins.
+    """
+    global helper_functions
+
+    helper_functions.clear()
+    helper_functions.update(_builtin_functions)
+
+    for plugin in reversed(list(p.PluginImplementations(p.ITemplateHelpers))):
+        helper_functions.update(plugin.get_helpers())
+
+
+@core_helper
+def sanitize_id(id_):
+    '''Given an id (uuid4), if it has any invalid characters it raises
+    ValueError.
+    '''
+    return str(uuid.UUID(id_))

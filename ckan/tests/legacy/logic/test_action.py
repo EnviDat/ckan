@@ -1,10 +1,12 @@
+# encoding: utf-8
+
 import re
 import json
 import urllib
 from pprint import pprint
 from nose.tools import assert_equal, assert_raises
 from nose.plugins.skip import SkipTest
-from pylons import config
+from ckan.common import config
 import datetime
 import mock
 
@@ -16,7 +18,7 @@ import ckan.model as model
 import ckan.tests.legacy as tests
 from ckan.tests.legacy import WsgiAppCase
 from ckan.tests.legacy.functional.api import assert_dicts_equal_ignoring_ordering
-from ckan.tests.legacy import setup_test_search_index, search_related
+from ckan.tests.legacy import setup_test_search_index
 from ckan.tests.legacy import StatusCodes
 from ckan.logic import get_action, NotAuthorized
 from ckan.logic.action import get_domain_object
@@ -114,22 +116,6 @@ class TestAction(WsgiAppCase):
         assert 'public_dataset' in res
         assert not 'private_dataset' in res
 
-    def test_01_package_show_with_jsonp(self):
-        anna_id = model.Package.by_name(u'annakarenina').id
-        postparams = '%s=1' % json.dumps({'id': anna_id})
-        res = self.app.post('/api/action/package_show?callback=jsoncallback', params=postparams)
-
-        assert re.match('jsoncallback\(.*\);', res.body), res
-        # Unwrap JSONP callback (we want to look at the data).
-        msg = res.body[len('jsoncallback')+1:-2]
-        res_dict = json.loads(msg)
-        assert_equal(res_dict['success'], True)
-        assert "/api/3/action/help_show?name=package_show" in res_dict['help']
-        pkg = res_dict['result']
-        assert_equal(pkg['name'], 'annakarenina')
-        missing_keys = set(('title', 'groups')) - set(pkg.keys())
-        assert not missing_keys, missing_keys
-
     def test_02_package_autocomplete_match_name(self):
         postparams = '%s=1' % json.dumps({'q':'war', 'limit': 5})
         res = self.app.post('/api/action/package_autocomplete', params=postparams)
@@ -151,58 +137,6 @@ class TestAction(WsgiAppCase):
         assert_equal(res_obj['result'][0]['title'], 'A Wonderful Story')
         assert_equal(res_obj['result'][0]['match_field'], 'title')
         assert_equal(res_obj['result'][0]['match_displayed'], 'A Wonderful Story (warandpeace)')
-
-    def test_03_create_update_package(self):
-
-        package = {
-            'author': None,
-            'author_email': None,
-            'extras': [{'key': u'original media','value': u'"book"'}],
-            'license_id': u'other-open',
-            'maintainer': None,
-            'maintainer_email': None,
-            'name': u'annakareninanew',
-            'notes': u'Some test now',
-            'resources': [{'alt_url': u'alt123',
-                           'description': u'Full text.',
-                           'extras': {u'alt_url': u'alt123', u'size': u'123'},
-                           'format': u'plain text',
-                           'hash': u'abc123',
-                           'position': 0,
-                           'url': u'http://datahub.io/download/'},
-                          {'alt_url': u'alt345',
-                           'description': u'Index of the novel',
-                           'extras': {u'alt_url': u'alt345', u'size': u'345'},
-                           'format': u'JSON',
-                           'hash': u'def456',
-                           'position': 1,
-                           'url': u'http://datahub.io/index.json'}],
-            'tags': [{'name': u'russian'}, {'name': u'tolstoy'}],
-            'title': u'A Novel By Tolstoy',
-            'url': u'http://datahub.io',
-            'version': u'0.7a'
-        }
-
-        wee = json.dumps(package)
-        postparams = '%s=1' % json.dumps(package)
-        res = self.app.post('/api/action/package_create', params=postparams,
-                            extra_environ={'Authorization': str(self.sysadmin_user.apikey)})
-        package_created = json.loads(res.body)['result']
-        print package_created
-        package_created['name'] = 'moo'
-        postparams = '%s=1' % json.dumps(package_created)
-        res = self.app.post('/api/action/package_update', params=postparams,
-                            extra_environ={'Authorization': str(self.sysadmin_user.apikey)})
-
-        package_updated = json.loads(res.body)['result']
-        package_updated.pop('revision_id')
-        package_updated.pop('metadata_created')
-        package_updated.pop('metadata_modified')
-
-        package_created.pop('revision_id')
-        package_created.pop('metadata_created')
-        package_created.pop('metadata_modified')
-        assert package_updated == package_created#, (pformat(json.loads(res.body)), pformat(package_created['result']))
 
     def test_03_create_private_package(self):
 
@@ -262,29 +196,6 @@ class TestAction(WsgiAppCase):
                                               apikey=self.sysadmin_user.apikey,
                                               **package_dict)
         assert package_created_private['private'] is True
-
-
-    def test_18_create_package_not_authorized(self):
-        # I cannot understand the logic on this one we seem to be user
-        # tester but no idea how.
-        raise SkipTest
-
-        package = {
-            'extras': [{'key': u'original media','value': u'"book"'}],
-            'license_id': u'other-open',
-            'maintainer': None,
-            'maintainer_email': None,
-            'name': u'annakareninanew_not_authorized',
-            'notes': u'Some test now',
-            'tags': [{'name': u'russian'}, {'name': u'tolstoy'}],
-            'title': u'A Novel By Tolstoy',
-            'url': u'http://datahub.io',
-        }
-
-        wee = json.dumps(package)
-        postparams = '%s=1' % json.dumps(package)
-        res = self.app.post('/api/action/package_create', params=postparams,
-                                     status=StatusCodes.STATUS_403_ACCESS_DENIED)
 
     def test_41_create_resource(self):
 
@@ -507,45 +418,6 @@ class TestAction(WsgiAppCase):
                             status=400)
         res_obj = json.loads(res.body)
         assert_equal(res_obj, u'Bad request - Action name not known: bad_action_name')
-
-    def test_19_update_resource(self):
-        package = {
-            'name': u'annakareninanew',
-            'resources': [{
-                'alt_url': u'alt123',
-                'description': u'Full text.',
-                'extras': {u'alt_url': u'alt123', u'size': u'123'},
-                'format': u'plain text',
-                'hash': u'abc123',
-                'position': 0,
-                'url': u'http://datahub.io/download/'
-            }],
-            'title': u'A Novel By Tolstoy',
-            'url': u'http://datahub.io',
-        }
-
-        postparams = '%s=1' % json.dumps(package)
-        res = self.app.post('/api/action/package_create', params=postparams,
-                            extra_environ={'Authorization': str(self.sysadmin_user.apikey)})
-        package_created = json.loads(res.body)['result']
-
-        resource_created = package_created['resources'][0]
-        new_resource_url = u'http://www.annakareinanew.com/download/'
-        resource_created['url'] = new_resource_url
-        postparams = '%s=1' % json.dumps(resource_created)
-        res = self.app.post('/api/action/resource_update', params=postparams,
-                            extra_environ={'Authorization': str(self.sysadmin_user.apikey)})
-
-        resource_updated = json.loads(res.body)['result']
-        assert resource_updated['url'] == new_resource_url, resource_updated
-
-        resource_updated.pop('url')
-        resource_updated.pop('revision_id')
-        resource_updated.pop('revision_timestamp', None)
-        resource_created.pop('url')
-        resource_created.pop('revision_id')
-        resource_created.pop('revision_timestamp', None)
-        assert_equal(resource_updated, resource_created)
 
     def test_20_task_status_update(self):
         package_created = self._add_basic_package(u'test_task_status_update')
@@ -1362,69 +1234,3 @@ class TestMember(WsgiAppCase):
         group_ids = [g.id for g in groups]
         assert res['success'] is True, res
         assert group.id in group_ids, (group, user_groups)
-
-
-class TestRelatedAction(WsgiAppCase):
-
-    sysadmin_user = None
-
-    normal_user = None
-
-    @classmethod
-    def setup_class(cls):
-        search.clear_all()
-        CreateTestData.create()
-        cls.sysadmin_user = model.User.get('testsysadmin')
-
-    @classmethod
-    def teardown_class(cls):
-        model.repo.rebuild_db()
-
-    def _add_basic_package(self, package_name=u'test_package', **kwargs):
-        package = {
-            'name': package_name,
-            'title': u'A Novel By Tolstoy',
-            'resources': [{
-                'description': u'Full text.',
-                'format': u'plain text',
-                'url': u'http://datahub.io/download/'
-            }]
-        }
-        package.update(kwargs)
-
-        postparams = '%s=1' % json.dumps(package)
-        res = self.app.post('/api/action/package_create', params=postparams,
-                            extra_environ={'Authorization': 'tester'})
-        return json.loads(res.body)['result']
-
-    def test_update_add_related_item(self):
-        package = self._add_basic_package()
-        related_item = {
-            "description": "Testing a Description",
-            "url": "http://example.com/image.png",
-            "title": "Testing",
-            "featured": 0,
-            "image_url": "http://example.com/image.png",
-            "type": "idea",
-            "dataset_id": package['id'],
-        }
-        related_item_json = json.dumps(related_item)
-        res_create = self.app.post('/api/action/related_create',
-                                   params=related_item_json,
-                                   extra_environ={'Authorization': 'tester'})
-        assert res_create.json['success']
-
-        related_update = res_create.json['result']
-        related_update = {'id': related_update['id'], 'title': 'Updated'}
-        related_update_json = json.dumps(related_update)
-        res_update = self.app.post('/api/action/related_update',
-                                   params=related_update_json,
-                                   extra_environ={'Authorization': 'tester'})
-        assert res_update.json['success']
-        res_update_json = res_update.json['result']
-        assert res_update_json['title'] == related_update['title']
-
-        related_item.pop('title')
-        related_item.pop('dataset_id')
-        for field in related_item:
-            assert related_item[field] == res_update_json[field]

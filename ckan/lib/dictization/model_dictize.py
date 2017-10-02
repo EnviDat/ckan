@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 '''
 These dictize functions generally take a domain object (such as Package) and
 convert it to a dictionary, including related objects (e.g. for Package it
@@ -12,7 +14,7 @@ which builds the dictionary by iterating over the table columns.
 import datetime
 import urlparse
 
-from pylons import config
+from ckan.common import config
 from sqlalchemy.sql import select
 
 import ckan.logic as logic
@@ -71,16 +73,6 @@ def resource_list_dictize(res_list, context):
 
     return sorted(result_list, key=lambda x: x["position"])
 
-def related_list_dictize(related_list, context):
-    result_list = []
-    for res in related_list:
-        related_dict = related_dictize(res, context)
-        result_list.append(related_dict)
-    if context.get('sorted'):
-        return result_list
-    return sorted(result_list, key=lambda x: x["created"], reverse=True)
-
-
 def extras_dict_dictize(extras_dict, context):
     result_list = []
     for name, extra in extras_dict.iteritems():
@@ -123,12 +115,9 @@ def resource_dictize(res, context):
                                     resource_id=res.id,
                                     filename=cleaned_name,
                                     qualified=True)
-    elif not urlparse.urlsplit(url).scheme and not context.get('for_edit'):
+    elif resource['url'] and not urlparse.urlsplit(url).scheme and not context.get('for_edit'):
         resource['url'] = u'http://' + url.lstrip('/')
     return resource
-
-def related_dictize(rel, context):
-    return d.table_dictize(rel, context)
 
 
 def _execute(q, table, context):
@@ -361,7 +350,7 @@ def group_dictize(group, context,
     like tags are included unless you specify it in the params.
 
     :param packages_field: determines the format of the `packages` field - can
-    be `datasets` or None.
+    be `datasets`, `dataset_count` or None.
     '''
     assert packages_field in ('datasets', 'dataset_count', None)
     if packages_field == 'dataset_count':
@@ -397,7 +386,7 @@ def group_dictize(group, context,
                     authz.has_user_permission_for_group_or_org(
                         group_.id, context.get('user'), 'read'))
                 if is_group_member:
-                    context['ignore_capacity_check'] = True
+                    q['include_private'] = True
 
             if not just_the_count:
                 # Is there a packages limit in the context?
@@ -599,12 +588,6 @@ def user_dictize(user, context, include_password_hash=False):
 
     model = context['model']
     session = model.Session
-
-    if context.get('with_related'):
-        related_items = session.query(model.Related).\
-                        filter(model.Related.owner_id==user.id).all()
-        result_dict['related_items'] = related_list_dictize(related_items,
-                                                            context)
 
     return result_dict
 

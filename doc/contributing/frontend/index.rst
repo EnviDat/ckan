@@ -11,11 +11,6 @@ Frontend development guidelines
    template-blocks
    javascript-module-tutorial
 
-.. seealso::
-
-   :doc:`/contributing/string-i18n`
-     How to mark strings for translation.
-
 -----------------------------
 Install frontend dependencies
 -----------------------------
@@ -165,7 +160,7 @@ JavaScript
 The core of the CKAN JavaScript is split up into three areas.
 
 -  Core (such as i18n, pub/sub and API clients)
--  :doc:`javascript-module-tutorial` (small HTML components or widgets)
+-  Modules (small HTML components or widgets)
 -  jQuery Plugins (very small reusable components)
 
 Core
@@ -185,9 +180,8 @@ Modules
 Modules are the core of the CKAN website, every component that is
 interactive on the page should be a module. These are then initialized
 by including a ``data-module`` attribute on an element on the page. For
-example:
+example::
 
-::
     <select name="format" data-module="autocomplete"></select>
 
 The idea is to create small isolated components that can easily be
@@ -203,7 +197,7 @@ factory function.
 
 ::
 
-    ckan.module('my-module', function (jQuery, _) {
+    ckan.module('my-module', function (jQuery) {
       return {
         initialize: function () {
           // Called when a module is created.
@@ -233,7 +227,7 @@ and allow different areas of the UI to update where relevant.
 
 ::
 
-    ckan.module('language-picker', function (jQuery, _) {
+    ckan.module('language-picker', function (jQuery) {
       return {
         initialize: function () {
           var sandbox = this.sandbox;
@@ -244,7 +238,7 @@ and allow different areas of the UI to update where relevant.
       }
     });
 
-    ckan.module('language-notifier', function (jQuery, _) {
+    ckan.module('language-notifier', function (jQuery) {
       return {
         initialize: function () {
           this.sandbox.subscribe('change:lang', function (lang) {
@@ -262,7 +256,7 @@ CKAN API, all functionality should be provided via the client object.
 
 ::
 
-    ckan.module('my-module', function (jQuery, _) {
+    ckan.module('my-module', function (jQuery) {
       return {
         initialize: function () {
           this.sandbox.client.getCompletions(this.options.completionsUrl);
@@ -270,42 +264,12 @@ CKAN API, all functionality should be provided via the client object.
       }
     });
 
-i18n/Jed
-========
 
-`Jed <http://slexaxton.github.com/Jed/>`_ is a Gettext implementation in
-JavaScript. It is used throughout the application to create translatable
-strings. An instance of Jed is available on the ``ckan.i18n`` object.
+Internationalization
+====================
 
-Modules get access to the ``translate()`` function via both the initial
-factory function and the ``this.sandbox.translate()`` object.
+See :ref:`javascript_i18n`.
 
-String interpolation can be provided using the
-`sprintf formatting <http://www.diveintojavascript.com/projects/javascript-sprintf>`_.
-We always use the named arguments to keep in line with the Python translations.
-And we name the translate function passed into ``ckan.module()`` ``_``.
-
-::
-
-    ckan.module('my-module', function (jQuery, _) {
-      return {
-        initialize: function () {
-          // Through sandbox translation
-          this.sandbox.translate('my string');
-
-          // Keyword arguments
-          _('Hello %(name)s').fetch({name: 'Bill'}); // Hello Bill
-
-          // Multiple.
-          _("I like your %(color)s %(fruit)s.").fetch({color: 'red', fruit: 'apple');
-
-          // Plurals.
-          _("I have %(num)d apple.")
-            .ifPlural(2, "I have %(num)d apples.")
-            .fetch({num: 2, fruit: 'apple');
-        }
-      };
-    });
 
 Life cycle
 ==========
@@ -327,43 +291,6 @@ the module to set themselves up.
 Modules should also provide a ``teardown()`` method this isn't used at
 the moment except in the unit tests to restore state but may become
 useful in the future.
-
-Internationalization
-====================
-
-All strings within modules should be internationalized. Strings can be
-set in the ``options.i18n`` object and there is a ``.i18n()`` helper for
-retrieving them.
-
-::
-
-    ckan.module('language-picker', function (jQuery, _) {
-      return {
-        options: {
-          i18n: {
-            hello_1: _('Hello'),
-            hello_2: _('Hello %(name)s'),
-            apples: function (params) {
-              var n = params.num;
-              return _('I have %(num)d apple').isPlural(n, 'I have %(num)d apples');
-            }
-          }
-        },
-        initialize: function () {
-          // Standard example
-          this.i18n('hello_1'); // "Hello"
-
-          // String interpolation example
-          var name = 'Dave';
-          this.i18n('hello_2', {name: name}); // "Hello Dave"
-
-          // Plural example
-          var total = 1;
-          this.i18n('apples', {num: total}); // "I have 1 apple"
-          this.i18n('apples', {num: 3});     // "I have 3 apples"
-        }
-      }
-    });
 
 
 jQuery plugins

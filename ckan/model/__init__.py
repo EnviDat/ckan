@@ -1,4 +1,5 @@
-from __future__ import with_statement   # necessary for python 2.5 support
+# encoding: utf-8
+
 import warnings
 import logging
 import re
@@ -85,12 +86,6 @@ from rating import (
     Rating,
     MIN_RATING,
     MAX_RATING,
-)
-from related import (
-    Related,
-    RelatedDataset,
-    related_dataset_table,
-    related_table,
 )
 from package_relationship import (
     PackageRelationship,
@@ -259,6 +254,8 @@ class Repository(vdm.sqlalchemy.Repository):
         else:
             tables = reversed(self.metadata.sorted_tables)
         for table in tables:
+            if table.name == 'migrate_version':
+                continue
             connection.execute('delete from "%s"' % table.name)
         self.session.commit()
         log.info('Database table data deleted')

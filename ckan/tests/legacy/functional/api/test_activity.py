@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 '''Functional tests for the public activity streams API.
 
 This module tests the contents of the various public activity streams:
@@ -13,12 +15,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 import pylons.test
-from pylons import config
+from ckan.common import config
 from paste.deploy.converters import asbool
 import paste.fixture
 from nose import SkipTest
 from ckan.common import json
 import ckan.tests.legacy as tests
+from ckan.tests.helpers import call_action
 
 
 ##def package_update(context, data_dict):
@@ -136,9 +139,9 @@ def make_package(name=None):
         'name': name,
         'title': 'My Test Package',
         'author': 'test author',
-        'author_email': 'test_author@test_author.com',
+        'author_email': 'test_author@testauthor.com',
         'maintainer': 'test maintainer',
-        'maintainer_email': 'test_maintainer@test_maintainer.com',
+        'maintainer_email': 'test_maintainer@testmaintainer.com',
         'notes': 'some test notes',
         'url': 'www.example.com',
         }
@@ -188,6 +191,7 @@ class TestActivity:
                 'name': sysadmin_user.name,
                 }
         normal_user = model.User.get('annafan')
+
         self.normal_user = {
                 'id': normal_user.id,
                 'apikey': normal_user.apikey,
@@ -274,7 +278,7 @@ class TestActivity:
         details['recently changed datasets stream'] = \
                 self.recently_changed_datasets_stream(apikey)
 
-        details['time'] = datetime.datetime.now()
+        details['time'] = datetime.datetime.utcnow()
         return details
 
     def _create_package(self, user, name=None):
@@ -289,10 +293,17 @@ class TestActivity:
 
         # Create a new package.
         request_data = make_package(name)
+
         before = self.record_details(user_id=user_id,
                 group_ids=[group['name'] for group in request_data['groups']],
                 apikey=apikey)
         extra_environ = {'Authorization': str(user['apikey'])}
+
+        call_action('member_create',
+                    capacity='admin',
+                    object=user['id'],
+                    object_type='user',
+                    id='roger')
         response = self.app.post('/api/action/package_create',
                 json.dumps(request_data), extra_environ=extra_environ)
         response_dict = json.loads(response.body)
@@ -1402,7 +1413,7 @@ class TestActivity:
         a new user is created.
 
         """
-        before = datetime.datetime.now()
+        before = datetime.datetime.utcnow()
 
         # Create a new user.
         user_dict = {'name': 'testuser',
@@ -2063,92 +2074,6 @@ class TestActivity:
         activities = tests.call_action_api(self.app,
                 'organization_activity_list', id=organization['name'])
         assert len(activities) > 0
-
-    def test_related_item_new(self):
-        user = self.normal_user
-        data = {'title': 'random', 'type': 'Application', 'url':
-                'http://example.com/application'}
-        extra_environ = {'Authorization': str(user['apikey'])}
-        response = self.app.post('/api/action/related_create',
-                                 json.dumps(data),
-                                 extra_environ=extra_environ)
-        response_dict = json.loads(response.body)
-        assert response_dict['success'] is True
-
-        activity_response = self.app.post('/api/3/action/user_activity_list',
-                                         json.dumps({'id': user['id']}))
-        activity_response_dict = json.loads(activity_response.body)
-        assert (activity_response_dict['result'][0]['activity_type'] == 'new '
-                'related item')
-        assert activity_response_dict['result'][0]['user_id'] == user['id']
-        assert (activity_response_dict['result'][0]['data']['related']['id'] ==
-                response_dict['result']['id'])
-        assert activity_response_dict['result'][0]['data']['dataset'] is None
-
-    def test_related_item_changed(self):
-        # Create related item
-        user = self.normal_user
-        data = {'title': 'random', 'type': 'Application', 'url':
-                'http://example.com/application'}
-        extra_environ = {'Authorization': str(user['apikey'])}
-        response = self.app.post('/api/action/related_create',
-                                 json.dumps(data),
-                                 extra_environ=extra_environ)
-        response_dict = json.loads(response.body)
-        assert response_dict['success'] is True
-
-        # Modify it
-        data = {'id': response_dict['result']['id'], 'title': 'random2',
-                'owner_id': str(user['id']), 'type': 'Application'}
-        response = self.app.post('/api/action/related_update',
-            json.dumps(data), extra_environ=extra_environ)
-        response_dict = json.loads(response.body)
-        assert response_dict['success'] is True
-
-        # Test for activity stream entries
-        activity_response = self.app.post('/api/3/action/user_activity_list',
-                                         json.dumps({'id': user['id']}))
-        activity_response_dict = json.loads(activity_response.body)
-        assert (activity_response_dict['result'][0]['activity_type'] ==
-                'changed related item')
-        assert (activity_response_dict['result'][0]['object_id'] ==
-                response_dict['result']['id'])
-        assert activity_response_dict['result'][0]['user_id'] == user['id']
-        assert (activity_response_dict['result'][0]['data']['related']['id'] ==
-                response_dict['result']['id'])
-        assert activity_response_dict['result'][0]['data']['dataset'] is None
-
-    def test_related_item_deleted(self):
-        # Create related item
-        user = self.normal_user
-        data = {'title': 'random', 'type': 'Application', 'url':
-                'http://example.com/application'}
-        extra_environ = {'Authorization': str(user['apikey'])}
-        response = self.app.post('/api/action/related_create',
-                                 json.dumps(data),
-                                 extra_environ=extra_environ)
-        response_dict = json.loads(response.body)
-        assert response_dict['success'] is True
-
-        # Delete related item
-        data = {'id': response_dict['result']['id']}
-        deleted_response = self.app.post('/api/action/related_delete',
-                                 json.dumps(data),
-                                 extra_environ=extra_environ)
-        deleted_response_dict = json.loads(deleted_response.body)
-        assert deleted_response_dict['success'] is True
-
-        # Test for activity stream entries
-        activity_response = self.app.post('/api/3/action/user_activity_list',
-                                         json.dumps({'id': user['id']}))
-        activity_response_dict = json.loads(activity_response.body)
-        assert (activity_response_dict['result'][0]['activity_type'] ==
-                'deleted related item')
-        assert (activity_response_dict['result'][0]['object_id'] ==
-                response_dict['result']['id'])
-        assert activity_response_dict['result'][0]['user_id'] == user['id']
-        assert (activity_response_dict['result'][0]['data']['related']['id'] ==
-                response_dict['result']['id'])
 
     def test_no_activity_when_creating_private_dataset(self):
         '''There should be no activity when a private dataset is created.'''

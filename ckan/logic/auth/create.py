@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import ckan.logic as logic
 import ckan.authz as authz
 import ckan.logic.auth as logic_auth
@@ -43,24 +45,6 @@ def file_upload(context, data_dict=None):
         return {'success': False, 'msg': _('User %s not authorized to create packages') % user}
     return {'success': True}
 
-def related_create(context, data_dict=None):
-    '''Users must be logged-in to create related items.
-
-    To create a featured item the user must be a sysadmin.
-    '''
-    model = context['model']
-    user = context['user']
-    userobj = model.User.get( user )
-
-    if userobj:
-        if data_dict.get('featured', 0) != 0:
-            return {'success': False,
-                    'msg': _('You must be a sysadmin to create a featured '
-                             'related item')}
-        return {'success': True}
-
-    return {'success': False, 'msg': _('You must be logged in to add a related item')}
-
 
 def resource_create(context, data_dict):
     model = context['model']
@@ -96,11 +80,11 @@ def resource_create(context, data_dict):
 
 
 def resource_view_create(context, data_dict):
-    return resource_create(context, {'id': data_dict['resource_id']})
+    return authz.is_authorized('resource_create', context, {'id': data_dict['resource_id']})
 
 
 def resource_create_default_resource_views(context, data_dict):
-    return resource_create(context, {'id': data_dict['resource']['id']})
+    return authz.is_authorized('resource_create', context, {'id': data_dict['resource']['id']})
 
 
 def package_create_default_resource_views(context, data_dict):
@@ -120,7 +104,7 @@ def package_relationship_create(context, data_dict):
     authorized2 = authz.is_authorized_boolean(
         'package_update', context, {'id': id2})
 
-    if not authorized1 and authorized2:
+    if not (authorized1 and authorized2):
         return {'success': False, 'msg': _('User %s not authorized to edit these packages') % user}
     else:
         return {'success': True}
@@ -194,10 +178,8 @@ def _check_group_auth(context, data_dict):
     for group_blob in group_blobs:
         # group_blob might be a dict or a group_ref
         if isinstance(group_blob, dict):
-            if api_version == '1':
-                id = group_blob.get('name')
-            else:
-                id = group_blob.get('id')
+            # use group id by default, but we can accept name as well
+            id = group_blob.get('id') or group_blob.get('name')
             if not id:
                 continue
         else:
@@ -213,7 +195,7 @@ def _check_group_auth(context, data_dict):
         groups = groups - set(pkg_groups)
 
     for group in groups:
-        if not authz.has_user_permission_for_group_or_org(group.id, user, 'update'):
+        if not authz.has_user_permission_for_group_or_org(group.id, user, 'manage_group'):
             return False
 
     return True
@@ -226,7 +208,7 @@ def package_create_rest(context, data_dict):
     if not user:
         return {'success': False, 'msg': _('Valid API key needed to create a package')}
 
-    return package_create(context, data_dict)
+    return authz.is_authorized('package_create', context, data_dict)
 
 def group_create_rest(context, data_dict):
     model = context['model']
@@ -234,7 +216,7 @@ def group_create_rest(context, data_dict):
     if not user:
         return {'success': False, 'msg': _('Valid API key needed to create a group')}
 
-    return group_create(context, data_dict)
+    return authz.is_authorized('group_create', context, data_dict)
 
 def vocabulary_create(context, data_dict):
     # sysadmins only
