@@ -67,6 +67,12 @@ schema. In this case the version should be set to the next CKAN version number.
     </fieldType>
 
 
+    <!-- spatial search field type (ckanext-spatial) -->
+    <fieldType name="location_rpt" class="solr.SpatialRecursivePrefixTreeFieldType"
+        spatialContextFactory="org.locationtech.spatial4j.context.jts.JtsSpatialContextFactory"
+        autoIndex="true"
+        distErrPct="0.025" maxDistErr="0.000009" distanceUnits="degrees" />
+
     <!-- A general unstemmed text field - good if one does not know the language of the field -->
     <fieldType name="textgen" class="solr.TextField" positionIncrementGap="100">
         <analyzer type="index">
@@ -152,6 +158,10 @@ schema. In this case the version should be set to the next CKAN version number.
 
     <field name="_version_" type="string" indexed="true" stored="true"/>
 
+    <!-- spatial search field (ckanext-spatial) -->
+    <field name="spatial_geom"  type="location_rpt" indexed="true" stored="true" multiValued="true" />
+    
+    <!-- dynamic fields -->
     <dynamicField name="*_date" type="date" indexed="true" stored="true" multiValued="false"/>
 
     <dynamicField name="extras_*" type="text" indexed="true" stored="true" multiValued="false"/>
