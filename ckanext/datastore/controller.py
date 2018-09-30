@@ -98,6 +98,9 @@ class DatastoreController(BaseController):
                     'info': fi if isinstance(fi, dict) else {}
                     } for f, fi in izip_longest(fields, info)]})
 
+            h.flash_success(_('Data Dictionary saved. Any type overrides will '
+                              'take effect when the resource is next uploaded '
+                              'to DataStore'))
             h.redirect_to(
                 controller='ckanext.datastore.controller:DatastoreController',
                 action='dictionary',
@@ -134,6 +137,7 @@ def dump_to(resource_id, output, fmt, offset, limit, options):
                 PAGINATE_BY if limit is None
                 else min(PAGINATE_BY, lim),
             'offset': offs,
+            'sort': '_id',
             'records_format': records_format,
             'include_total': 'false',  # XXX: default() is broken
         })

@@ -1,6 +1,7 @@
 # encoding: utf-8
 
 from paste.deploy.converters import asbool
+from six import text_type
 
 import ckan.model as model
 from ckan.common import g, request, config, session
@@ -54,7 +55,7 @@ def set_cors_headers_for_response(response):
 
         cors_origin_allowed = None
         if asbool(config.get(u'ckan.cors.origin_allow_all')):
-            cors_origin_allowed = u'*'
+            cors_origin_allowed = b'*'
         elif config.get(u'ckan.cors.origin_whitelist') and \
                 request.headers.get(u'Origin') \
                 in config[u'ckan.cors.origin_whitelist'].split(u' '):
@@ -62,12 +63,12 @@ def set_cors_headers_for_response(response):
             cors_origin_allowed = request.headers.get(u'Origin')
 
         if cors_origin_allowed is not None:
-            response.headers[u'Access-Control-Allow-Origin'] = \
+            response.headers[b'Access-Control-Allow-Origin'] = \
                 cors_origin_allowed
-            response.headers[u'Access-Control-Allow-Methods'] = \
-                u'POST, PUT, GET, DELETE, OPTIONS'
-            response.headers[u'Access-Control-Allow-Headers'] = \
-                u'X-CKAN-API-KEY, Authorization, Content-Type'
+            response.headers[b'Access-Control-Allow-Methods'] = \
+                b'POST, PUT, GET, DELETE, OPTIONS'
+            response.headers[b'Access-Control-Allow-Headers'] = \
+                b'X-CKAN-API-KEY, Authorization, Content-Type'
 
     return response
 
@@ -115,7 +116,7 @@ def identify_user():
         g.author = g.user
     else:
         g.author = g.remote_addr
-    g.author = unicode(g.author)
+    g.author = text_type(g.author)
 
 
 def _identify_user_default():
@@ -178,3 +179,14 @@ def _get_user_for_apikey():
     query = model.Session.query(model.User)
     user = query.filter_by(apikey=apikey).first()
     return user
+
+
+def set_controller_and_action():
+    try:
+        controller, action = request.endpoint.split(u'.')
+    except ValueError:
+        log.debug(
+            u'Endpoint does not contain dot: {}'.format(request.endpoint)
+        )
+        controller = action = request.endpoint
+    g.controller, g.action = controller, action

@@ -1,7 +1,9 @@
 # encoding: utf-8
 
-# Avoid problem releasing to pypi from vagrant
 import os
+import os.path
+
+# Avoid problem releasing to pypi from vagrant
 if os.environ.get('USER', '') == 'vagrant':
     del os.link
 
@@ -17,18 +19,26 @@ except ImportError:
 from ckan import (__version__, __description__, __long_description__,
                   __license__)
 
-MIN_SETUPTOOLS_VERSION = 20.4
-assert setuptools_version >= str(MIN_SETUPTOOLS_VERSION) and \
-    int(setuptools_version.split('.')[0]) >= int(MIN_SETUPTOOLS_VERSION),\
-    ('setuptools version error'
-     '\nYou need a newer version of setuptools.\n'
-     'You have {current}, you need at least {minimum}'
-     '\nInstall the recommended version:\n'
-     '    pip install -r requirement-setuptools.txt\n'
-     'and then try again to install ckan into your python environment.'.format(
-         current=setuptools_version,
-         minimum=MIN_SETUPTOOLS_VERSION
-         ))
+
+#
+# Check setuptools version
+#
+
+def parse_version(s):
+    return map(int, s.split('.'))
+
+HERE = os.path.dirname(__file__)
+with open(os.path.join(HERE, 'requirement-setuptools.txt')) as f:
+        setuptools_requirement = f.read().strip()
+min_setuptools_version = parse_version(setuptools_requirement.split('==')[1])
+if parse_version(setuptools_version) < min_setuptools_version:
+    raise AssertionError(
+        'setuptools version error\n'
+        'You need a newer version of setuptools.\n'
+        'Install the recommended version:\n'
+        '    pip install -r requirement-setuptools.txt\n'
+        'and then try again to install ckan into your python environment.'
+    )
 
 
 entry_points = {
@@ -50,7 +60,6 @@ entry_points = {
         'search-index = ckan.lib.cli:SearchIndexCommand',
         'ratings = ckan.lib.cli:Ratings',
         'notify = ckan.lib.cli:Notification',
-        'celeryd = ckan.lib.cli:Celery',
         'rdf-export = ckan.lib.cli:RDFExport',
         'tracking = ckan.lib.cli:Tracking',
         'plugin-info = ckan.lib.cli:PluginInfo',
@@ -160,6 +169,7 @@ entry_points = {
         'example_iconfigurer_v1 = ckanext.example_iconfigurer.plugin_v1:ExampleIConfigurerPlugin',
         'example_iconfigurer_v2 = ckanext.example_iconfigurer.plugin_v2:ExampleIConfigurerPlugin',
         'example_flask_iblueprint = ckanext.example_flask_iblueprint.plugin:ExampleFlaskIBlueprintPlugin',
+        'example_flask_streaming = ckanext.example_flask_streaming.plugin:ExampleFlaskStreamingPlugin',
         'example_iuploader = ckanext.example_iuploader.plugin:ExampleIUploader',
         'example_idatastorebackend = ckanext.example_idatastorebackend.plugin:ExampleIDatastoreBackendPlugin',
         'example_ipermissionlabels = ckanext.example_ipermissionlabels.plugin:ExampleIPermissionLabelsPlugin',
@@ -182,6 +192,7 @@ entry_points = {
         'test_json_resource_preview = tests.legacy.ckantestplugins:JsonMockResourcePreviewExtension',
         'sample_datastore_plugin = ckanext.datastore.tests.sample_datastore_plugin:SampleDataStorePlugin',
         'example_datastore_deleted_with_count_plugin = ckanext.datastore.tests.test_chained_action:ExampleDataStoreDeletedWithCountPlugin',
+        'example_data_store_search_sql_plugin = ckanext.datastore.tests.test_chained_auth_functions:ExampleDataStoreSearchSQLPlugin',
         'test_datastore_view = ckan.tests.lib.test_datapreview:MockDatastoreBasedResourceView',
         'test_datapusher_plugin = ckanext.datapusher.tests.test_interfaces:FakeDataPusherPlugin',
         'test_routing_plugin = ckan.tests.config.test_middleware:MockRoutingPlugin',
@@ -206,6 +217,7 @@ setup(
     keywords='data packaging component tool server',
     long_description=__long_description__,
     zip_safe=False,
+    include_package_data=True,
     packages=find_packages(exclude=['ez_setup']),
     namespace_packages=['ckanext', 'ckanext.stats'],
     message_extractors={
@@ -234,7 +246,7 @@ setup(
         'Development Status :: 5 - Production/Stable',
         'License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 2 :: Only'
+        'Programming Language :: Python :: 2 :: Only',
         'Programming Language :: Python :: 2.7',
     ],
 )
