@@ -132,7 +132,9 @@ class PackageSearchIndex(SearchIndex):
 
         # delete the package if there is no state, or the state is `deleted`
         if (not pkg_dict.get('state') or 'deleted' in pkg_dict.get('state')):
-            return self.delete_package(pkg_dict)
+            # mark as deleted instead of deleting it
+            pkg_dict['state'] = 'deleted'
+            #return self.delete_package(pkg_dict)
 
         index_fields = RESERVED_FIELDS + pkg_dict.keys()
 
@@ -316,12 +318,15 @@ class PackageSearchIndex(SearchIndex):
             raise SearchIndexError(e)
 
     def delete_package(self, pkg_dict):
-        conn = make_connection()
-        query = "+%s:%s AND +(id:\"%s\" OR name:\"%s\") AND +site_id:\"%s\"" % \
-                (TYPE_FIELD, PACKAGE_TYPE, pkg_dict.get('id'), pkg_dict.get('id'), config.get('ckan.site_id'))
-        try:
-            commit = asbool(config.get('ckan.search.solr_commit', 'true'))
-            conn.delete(q=query, commit=commit)
-        except Exception as e:
-            log.exception(e)
-            raise SearchIndexError(e)
+        # mark as deleted and index normally
+        pkg_dict['state'] = 'deleted'
+        self.index_package(pkg_dict)
+#        conn = make_connection()
+#        query = "+%s:%s AND +(id:\"%s\" OR name:\"%s\") AND +site_id:\"%s\"" % \
+#                (TYPE_FIELD, PACKAGE_TYPE, pkg_dict.get('id'), pkg_dict.get('id'), config.get('ckan.site_id'))
+#        try:
+#            commit = asbool(config.get('ckan.search.solr_commit', 'true'))
+#            conn.delete(q=query, commit=commit)
+#        except Exception as e:
+#            log.exception(e)
+#            raise SearchIndexError(e)
