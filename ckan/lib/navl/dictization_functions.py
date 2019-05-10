@@ -191,8 +191,8 @@ def augment_data(data, schema):
                              for initial_key in flattened_schema]:
             if data[key] != []:
                 raise DataError('Only lists of dicts can be placed against '
-                                'subschema %s, not %s' %
-                                (key, type(data[key])))
+                                'subschema %s, not %s \n %s' %
+                                (key, type(data[key]), data[key]))
 
         if key[:-1] in key_combinations:
             extras_key = key[:-1] + ('__extras',)

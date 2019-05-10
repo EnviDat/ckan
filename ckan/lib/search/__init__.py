@@ -154,6 +154,7 @@ def rebuild(package_id=None, only_missing=False, force=False, refresh=False,
         package_index.insert_dict(pkg_dict)
     elif package_ids:
         for package_id in package_ids:
+            log.info("indexing %n", package_id)
             pkg_dict = logic.get_action('package_show')(context,
                 {'id': package_id})
             log.info('Indexing just package %r...', pkg_dict['name'])

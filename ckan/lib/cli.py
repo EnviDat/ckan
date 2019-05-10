@@ -1285,6 +1285,7 @@ class Tracking(CkanCommand):
 
         from ckan.lib.search import rebuild
         for package_id in package_ids:
+            print("\t- Rebuilding package %s " % (package_id))
             try:
                 rebuild(package_id)
             except logic.NotFound:
