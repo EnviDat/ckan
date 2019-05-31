@@ -58,8 +58,13 @@ def abort(status_code=None, detail='', headers=None, comment=None):
     if status_code == 403:
         # Allow IAuthenticator plugins to alter the abort
         for item in p.PluginImplementations(p.IAuthenticator):
-            result = item.abort(status_code, detail, headers, comment)
-            (status_code, detail, headers, comment) = result
+            try:
+                result = item.abort(status_code, detail, headers, comment)
+                (status_code, detail, headers, comment) = result
+            except Exception as e:
+                log.error("Exception trying to get result details: " + str(e))
+                log.error("Exception trying to get result details: " + str(result))
+
 
     if detail and status_code != 503:
         h.flash_error(detail)
