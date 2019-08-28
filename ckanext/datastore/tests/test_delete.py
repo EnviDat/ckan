@@ -295,8 +295,6 @@ class TestDatastoreDelete(DatastoreLegacyTestBase):
         assert(len(results['result']['records']) == 0)
 
         self._delete()
-<<<<<<< HEAD
-=======
 
 
 class TestDatastoreFunctionDelete(DatastoreFunctionalTestBase):
@@ -327,4 +325,3 @@ class TestDatastoreFunctionDelete(DatastoreFunctionalTestBase):
             u'datastore_function_delete',
             name=u'test_not_there_either',
             if_exists=True)
->>>>>>> ckan-2.7.2
