@@ -1,11 +1,5 @@
-<<<<<<< HEAD
-# -*- encoding: utf-8 -*-
-
-import pylons
-=======
 # encoding: utf-8
 
->>>>>>> ckan-2.7.2
 import sqlalchemy.orm as orm
 import nose
 
