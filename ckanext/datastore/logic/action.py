@@ -159,13 +159,7 @@ def datastore_create(context, data_dict):
         log.debug(
             'Setting datastore_active=True on resource {0}'.format(resobj.id)
         )
-<<<<<<< HEAD
-        p.toolkit.get_action('resource_patch')(
-            context,
-            {'id': data_dict['resource_id'], 'datastore_active': True})
-=======
         set_datastore_active_flag(model, data_dict, True)
->>>>>>> ckan-2.7.2
 
     result.pop('id', None)
     result.pop('connection_url', None)
