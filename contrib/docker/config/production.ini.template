@@ -1,0 +1,280 @@
+#
+# CKAN - Pylons configuration
+#
+# These are some of the configuration options available for your CKAN
+# instance. Check the documentation in 'doc/configuration.rst' or at the
+# following URL for a description of what they do and the full list of
+# available options:
+#
+# http://docs.ckan.org/en/latest/maintaining/configuration.html
+#
+# The %(here)s variable will be replaced with the parent directory of this file
+#
+
+[DEFAULT]
+
+# WARNING: *THIS SETTING MUST BE SET TO FALSE ON A PRODUCTION ENVIRONMENT*
+debug = false
+
+[server:main]
+use = egg:Paste#http
+host = 0.0.0.0
+port = 5000
+
+[app:main]
+use = egg:ckan
+full_stack = true
+cache_dir = /tmp/%(ckan.site_id)s/
+beaker.session.key = ckan
+ckan.tracking_enabled = false
+
+# This is the secret token that the beaker library uses to hash the cookie sent
+# to the client. `paster make-config` generates a unique value for this each
+# time it generates a config file.
+beaker.session.secret = FILL_UP
+
+# `paster make-config` generates a unique value for this each time it generates
+# a config file.
+app_instance_uuid = FILL_UP
+
+# repoze.who config
+who.config_file = %(here)s/who.ini
+who.log_level = warning
+who.log_file = %(cache_dir)s/who_log.ini
+# Session timeout (user logged out after period of inactivity, in seconds).
+# Inactive by default, so the session doesn't expire.
+# who.timeout = 86400
+
+## Database Settings
+sqlalchemy.url = FILL_UP
+
+# PostgreSQL' full-text search parameters
+ckan.datastore.default_fts_lang = english
+ckan.datastore.default_fts_index_method = gist
+
+## Site Settings
+ckan.site_url = FILL_UP
+ckan.datasets_per_page = 10
+
+## Authorization Settings
+
+ckan.auth.anon_create_dataset = false
+ckan.auth.create_unowned_dataset = false
+ckan.auth.create_dataset_if_not_in_organization = false
+ckan.auth.user_create_groups = false
+ckan.auth.user_create_organizations = false
+ckan.auth.user_delete_groups = false
+ckan.auth.user_delete_organizations = false
+ckan.auth.create_user_via_api = false
+ckan.auth.create_user_via_web = false
+ckan.auth.roles_that_cascade_to_sub_groups = admin
+
+## Search Settings
+ckan.site_id = default
+solr_url = FILL_UP
+
+search.facets = tags license_id organization groups
+
+## CORS Settings
+
+# If cors.origin_allow_all is true, all origins are allowed.
+# If false, the cors.origin_whitelist is used.
+ckan.cors.origin_allow_all = true
+# cors.origin_whitelist is a space separated list of allowed domains.
+# ckan.cors.origin_whitelist = http://example1.com http://example2.com
+
+######################
+## PLUGINS Settings ##
+######################
+
+# Note: Add ``datastore`` to enable the CKAN DataStore
+#       Add ``datapusher`` to enable DataPusher
+#		Add ``resource_proxy`` to enable resorce proxying and get around the
+#		same origin policy
+ckan.plugins = datacite_publication
+               passwordless
+               package_converter
+               restricted
+               stats text_view image_view
+               spatial_metadata spatial_query
+               envidat_theme
+               hierarchy_display
+               scheming_datasets scheming_organizations repeating composite
+               oaipmh_repository
+
+# recline_view
+
+# Define which views should be created by default
+# (plugins must be loaded in ckan.plugins)
+ckan.views.default_views = image_view text_view
+
+# recline_view
+
+# Custom metatadata converters for package_converter(no init params)
+package_converter.converters = ckanext.package_converter.model.scheming_converter.Datacite43SchemingConverter
+                               ckanext.package_converter.model.scheming_resource_converter.Datacite43SchemingResourceConverter
+                               ckanext.package_converter.custom.custom_converter.CustomConverter
+                               ckanext.package_converter.model.envidat_iso_converter.Iso19139Converter
+                               ckanext.package_converter.model.envidat_dif_converter.GcmdDifConverter
+                               ckanext.package_converter.model.envidat_bibtex_converter.BibtexConverter
+                               ckanext.package_converter.model.envidat_ris_converter.RisConverter
+                               ckanext.package_converter.model.envidat_csv_converter.CsvConverter
+                               ckanext.package_converter.model.envidat_readme_converter.ReadmeConverter
+                               ckanext.package_converter.model.envidat_schemaorg_dataset_converter.SchemaOrgDadatasetConverter
+
+## Spatial extension config
+ckanext.spatial.search_backend = solr-spatial-field
+ckan.spatial.srid = 4326
+
+ckanext.spatial.common_map.type = custom
+ckanext.spatial.common_map.custom.url = https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png
+ckanext.spatial.common_map.attribution = &copy; EnviDat 2018 (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>); Map data: &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)
+
+
+## Scheming + repeating Extension config
+#   module-path:file to schemas being used
+#scheming.dataset_schemas = ckanext.envidat_schema:datacite_dataset.json
+#scheming.organization_schemas = ckanext.envidat_schema:hierarchy_org.json
+
+scheming.dataset_schemas = ckanext.envidat_theme:datacite_dataset.json
+scheming.organization_schemas = ckanext.envidat_theme:hierarchy_org.json
+
+#                      ckanext.spatialx:spatialxy_schema.json
+#   will try to load "spatialx_schema.json" and "spatialxy_schema.json"
+#   as dataset schemas
+#   URLs may also be used, e.g:
+# scheming.dataset_schemas = http://example.com/spatialx_schema.json
+
+#   Preset files may be included as well. The default preset setting is:
+scheming.presets = ckanext.scheming:presets.json
+                   ckanext.repeating:presets.json
+                   ckanext.composite:presets.json
+                   ckanext.envidat_theme:presets.json
+                   ckanext.datacite_publication:presets.json
+
+#   The is_fallback setting may be changed as well. Defaults to false:
+scheming.dataset_fallback = false
+
+# Restricted
+ckan.recaptcha.version = 2
+ckan.recaptcha.privatekey = FILL_UP
+ckan.recaptcha.publickey = FILL_UP
+
+# oai_repository settings
+oaipmh_repository.id_prefix = oai:envidat.ch:
+oaipmh_repository.site_id = EnviDat
+oaipmh_repository.id_field = id
+oaipmh_repository.max = 100
+oaipmh_repository.validate = False
+oaipmh_repository.deleted_record = transient
+
+# datacite_publishing settings
+datacite_publication.minter = ckanext.datacite_publication.doi_db_index.DataciteIndexDOI
+datacite_publication.doi_prefix = 10.16904
+datacite_publication.sqlalchemy.url = FILL_UP
+datacite_publication.site_id = envidat03
+datacite_publication.custom_prefix = 10.16904
+datacite_publication.datacite_url = https://api.datacite.org/dois
+datacite_publication.account_name = FILL_UP
+datacite_publication.account_password = FILL_UP
+datacite_publication.url_prefix = https://www.envidat.ch/#/metadata/
+
+## Front-End Settings
+ckan.site_title = EnviDat
+ckan.site_logo = envidat-logo-banner-new.png
+ckan.site_description =
+ckan.favicon = envidat-logo-icon-new.ico
+ckan.gravatar_default = identicon
+ckan.preview.direct = png jpg gif
+ckan.preview.loadable = html htm rdf+xml owl+xml xml n3 n-triples turtle plain atom csv tsv rss txt json
+
+ckan.display_timezone = server
+
+# package_hide_extras = for_search_index_only
+#package_edit_return_url = http://another.frontend/dataset/<NAME>
+#package_new_return_url = http://another.frontend/dataset/<NAME>
+#licenses_group_url = http://licenses.opendefinition.org/licenses/groups/ckan.json
+licenses_group_url = http://envidat03.wsl.ch/envidat_license.json
+# ckan.template_footer_end =
+ckan.featured_orgs = wsl slf
+
+
+## Internationalisation Settings
+ckan.locale_default = en
+# ckan.locale_order = en pt_BR ja it cs_CZ ca es fr el sv sr sr@latin no sk fi ru de pl nl bg ko_KR hu sa sl lv
+ckan.locales_offered = en
+ckan.locales_filtered_out = en_GB
+
+## Feeds Settings
+
+ckan.feeds.authority_name =
+ckan.feeds.date =
+ckan.feeds.author_name =
+ckan.feeds.author_link =
+
+## Storage Settings
+ckan.storage_path = /data/ckan/default
+ckan.max_resource_size = 10000
+ckan.max_image_size = 20
+
+## Datapusher settings
+
+# Make sure you have set up the DataStore
+
+#ckan.datapusher.formats = csv xls xlsx tsv application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+#ckan.datapusher.url = http://127.0.0.1:8800/
+
+# Resource Proxy settings
+# Preview size limit, default: 1MB
+#ckan.resource_proxy.max_file_size = 1048576
+# Size of chunks to read/write.
+#ckan.resource_proxy.chunk_size = 4096
+
+## Activity Streams Settings
+#ckan.activity_streams_enabled = true
+#ckan.activity_list_limit = 31
+#ckan.activity_streams_email_notifications = true
+#ckan.email_notifications_since = 2 days
+ckan.hide_activity_from_users = %(ckan.site_id)s
+
+## Email settings
+email_to = FILL_UP
+error_email_from = FILL_UP
+smtp.server = FILL_UP
+smtp.starttls = False
+smtp.mail_from = FILL_UP
+
+## Logging configuration
+[loggers]
+keys = root, ckan, ckanext
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARNING
+handlers = console
+
+[logger_ckan]
+level = WARNING
+handlers = console
+qualname = ckan
+propagate = 0
+
+[logger_ckanext]
+level = WARNING
+handlers = console
+qualname = ckanext
+propagate = 0
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(asctime)s %(levelname)-5.5s [%(name)s] %(message)s

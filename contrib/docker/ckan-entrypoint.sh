@@ -1,17 +1,12 @@
 #!/bin/sh
 set -e
 
-# URL for the primary database, in the format expected by sqlalchemy (required
-# unless linked to a container called 'db')
-: ${CKAN_SQLALCHEMY_URL:=}
-# URL for solr (required unless linked to a container called 'solr')
-: ${CKAN_SOLR_URL:=}
 # URL for redis (required unless linked to a container called 'redis')
-: ${CKAN_REDIS_URL:=}
-# URL for datapusher (required unless linked to a container called 'datapusher')
-: ${CKAN_DATAPUSHER_URL:=}
+#: ${CKAN_REDIS_URL:=}
 
-CONFIG="${CKAN_CONFIG}/production.ini"
+
+CONFIG="${CKAN_CONFIG}/development.ini"
+CONFIG_TEMPLATE="${CKAN_CONFIG}/development.ini.new"
 
 abort () {
   echo "$@" >&2
@@ -19,49 +14,43 @@ abort () {
 }
 
 set_environment () {
-  export CKAN_SITE_ID=${CKAN_SITE_ID}
-  export CKAN_SITE_URL=${CKAN_SITE_URL}
-  export CKAN_SQLALCHEMY_URL=${CKAN_SQLALCHEMY_URL}
-  export CKAN_SOLR_URL=${CKAN_SOLR_URL}
-  export CKAN_REDIS_URL=${CKAN_REDIS_URL}
+#  export CKAN_SITE_ID=${CKAN_SITE_ID}
+#  export CKAN_SITE_URL=${CKAN_SITE_URL}
+#  export CKAN_REDIS_URL=${CKAN_REDIS_URL}
   export CKAN_STORAGE_PATH=/var/lib/ckan
-  export CKAN_DATAPUSHER_URL=${CKAN_DATAPUSHER_URL}
-  export CKAN_DATASTORE_WRITE_URL=${CKAN_DATASTORE_WRITE_URL}
-  export CKAN_DATASTORE_READ_URL=${CKAN_DATASTORE_READ_URL}
-  export CKAN_SMTP_SERVER=${CKAN_SMTP_SERVER}
-  export CKAN_SMTP_STARTTLS=${CKAN_SMTP_STARTTLS}
-  export CKAN_SMTP_USER=${CKAN_SMTP_USER}
-  export CKAN_SMTP_PASSWORD=${CKAN_SMTP_PASSWORD}
-  export CKAN_SMTP_MAIL_FROM=${CKAN_SMTP_MAIL_FROM}
-  export CKAN_MAX_UPLOAD_SIZE_MB=${CKAN_MAX_UPLOAD_SIZE_MB}
+#  export CKAN_SMTP_SERVER=${CKAN_SMTP_SERVER}
+#  export CKAN_SMTP_STARTTLS=${CKAN_SMTP_STARTTLS}
+#  export CKAN_SMTP_USER=${CKAN_SMTP_USER}
+#  export CKAN_SMTP_PASSWORD=${CKAN_SMTP_PASSWORD}
+#  export CKAN_SMTP_MAIL_FROM=${CKAN_SMTP_MAIL_FROM}
+#  export CKAN_MAX_UPLOAD_SIZE_MB=${CKAN_MAX_UPLOAD_SIZE_MB}
 }
 
 write_config () {
-  ckan-paster make-config --no-interactive ckan "$CONFIG"
+  ckan-paster make-config --no-interactive ckan "$CONFIG_TEMPLATE"
 }
 
-# If we don't already have a config file, bootstrap
-if [ ! -e "$CONFIG" ]; then
+# Create a config template for the uuid and the beaker secret
+ if [ ! -e "$CONFIG_TEMPLATE" ]; then
   write_config
 fi
 
-# Get or create CKAN_SQLALCHEMY_URL
-if [ -z "$CKAN_SQLALCHEMY_URL" ]; then
-  abort "ERROR: no CKAN_SQLALCHEMY_URL specified in docker-compose.yml"
-fi
+#if [ -z "$CKAN_REDIS_URL" ]; then
+#    abort "ERROR: no CKAN_REDIS_URL specified in docker-compose.yml"
+#fi
 
-if [ -z "$CKAN_SOLR_URL" ]; then
-    abort "ERROR: no CKAN_SOLR_URL specified in docker-compose.yml"
-fi
+# Check config
+echo "\nCOPY this strings to your ini file the first time to replace default values and rebuild"
+cat "$CONFIG_TEMPLATE" | grep beaker
+cat "$CONFIG_TEMPLATE" | grep app_instance_uuid
 
-if [ -z "$CKAN_REDIS_URL" ]; then
-    abort "ERROR: no CKAN_REDIS_URL specified in docker-compose.yml"
-fi
-
-if [ -z "$CKAN_DATAPUSHER_URL" ]; then
-    abort "ERROR: no CKAN_DATAPUSHER_URL specified in docker-compose.yml"
-fi
+echo "\nCHECK: These are the main parameters of your config file:"
+cat "$CONFIG" | grep beaker
+cat "$CONFIG" | grep app_instance_uuid
+cat "$CONFIG" | grep solr
+cat "$CONFIG" | grep sqlalchemy
+cat "$CONFIG" | grep redis
 
 set_environment
-ckan-paster --plugin=ckan db init -c "${CKAN_CONFIG}/production.ini"
+ckan-paster --plugin=ckan db init -c "$CONFIG"
 exec "$@"

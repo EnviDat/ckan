@@ -49,6 +49,7 @@ def escape_xml_illegal_chars(val, replacement=''):
 def clear_index():
     conn = make_connection()
     query = "+site_id:\"%s\"" % (config.get('ckan.site_id'))
+    print("QUERY: " + str(query))
     try:
         conn.delete(q=query)
     except socket.error as e:
@@ -56,7 +57,7 @@ def clear_index():
         log.error(err)
         raise SearchIndexError(err)
     except pysolr.SolrError as e:
-        err = 'SOLR %r exception: %r' % (conn.url, e)
+        err = 'SOLR %r exception: %r with query: %r' % (conn.url, e, query)
         log.error(err)
         raise SearchIndexError(err)
 
