@@ -1,20 +1,8 @@
-#
-# CKAN - Pylons configuration
-#
-# These are some of the configuration options available for your CKAN
-# instance. Check the documentation in 'doc/configuration.rst' or at the
-# following URL for a description of what they do and the full list of
-# available options:
-#
-# http://docs.ckan.org/en/latest/maintaining/configuration.html
-#
-# The %(here)s variable will be replaced with the parent directory of this file
-#
 
 [DEFAULT]
 
-# WARNING: *THIS SETTING MUST BE SET TO FALSE ON A PRODUCTION ENVIRONMENT*
-debug = false
+# *help* Set to true or false
+debug = FILL_UP
 
 [server:main]
 use = egg:Paste#http
@@ -31,10 +19,13 @@ ckan.tracking_enabled = false
 # This is the secret token that the beaker library uses to hash the cookie sent
 # to the client. `paster make-config` generates a unique value for this each
 # time it generates a config file.
+# *help* you can use a variation of this string ZTrTx99MB/+Qbd9N1CfV3pUBP
 beaker.session.secret = FILL_UP
 
 # `paster make-config` generates a unique value for this each time it generates
 # a config file.
+
+# *help* you can use a variation of this string 6349e3e5-ccb3-40b2-9c18-b36dbc54348d
 app_instance_uuid = FILL_UP
 
 # repoze.who config
@@ -46,6 +37,12 @@ who.log_file = %(cache_dir)s/who_log.ini
 # who.timeout = 86400
 
 ## Database Settings
+
+# *help* the url shoul be in the form postgresql://<USER>:<PASSWORD>@<HOST>:<PORT>/<DATABASE>
+#        example (linux):
+#            sqlalchemy.url = postgresql://ckan_default:mypassword@envidat01.wsl.ch:5432/ckan_default
+#        example (Mac/Windows)
+#            sqlalchemy.url = postgresql://ckan_default:ckan@host.docker.internal/ckan_default
 sqlalchemy.url = FILL_UP
 
 # PostgreSQL' full-text search parameters
@@ -53,11 +50,20 @@ ckan.datastore.default_fts_lang = english
 ckan.datastore.default_fts_index_method = gist
 
 ## Site Settings
+
+# *help* this url should be the one used to reach the instance from outside
+#        if this is not well configured the maps won't work for example.
+#        example (linux production)
+#            ckan.site_url = https://www.envidat.ch
+#        example (linux Development)
+#            ckan.site_url = http://envidat01.wsl.ch:5000
+#        example (Mac/Windows local)
+#            ckan.site_url = http://0.0.0.0:5000
 ckan.site_url = FILL_UP
+
 ckan.datasets_per_page = 10
 
 ## Authorization Settings
-
 ckan.auth.anon_create_dataset = false
 ckan.auth.create_unowned_dataset = false
 ckan.auth.create_dataset_if_not_in_organization = false
@@ -71,9 +77,23 @@ ckan.auth.roles_that_cascade_to_sub_groups = admin
 
 ## Search Settings
 ckan.site_id = default
+# *help* this url should point to the solr core used for search
+#        example (Linux)
+#           solr_url = http://envidat01.wsl.ch:8983/solr/ckan_default
+#        example (Mac/Windows local)
+#           solr_url = http://host.docker.internal:8983/solr/ckan_default
 solr_url = FILL_UP
 
 search.facets = tags license_id organization groups
+
+## Redis Settings
+# URL to your Redis instance, including the database to be used.
+# *help* this url should point to the redis installation (defaults to redis://localhost:6379/0)
+#        example (Redis in the same container)
+#           ckan.redis.url = redis://redis:6379/0
+#        example (Mac/Windows Redis in localhost)
+#           ckan.redis.url = redis://host.docker.internal:6379/0
+ckan.redis.url = FILL_UP
 
 ## CORS Settings
 
@@ -91,6 +111,7 @@ ckan.cors.origin_allow_all = true
 #       Add ``datapusher`` to enable DataPusher
 #		Add ``resource_proxy`` to enable resorce proxying and get around the
 #		same origin policy
+
 ckan.plugins = datacite_publication
                passwordless
                package_converter
@@ -102,13 +123,9 @@ ckan.plugins = datacite_publication
                scheming_datasets scheming_organizations repeating composite
                oaipmh_repository
 
-# recline_view
-
 # Define which views should be created by default
 # (plugins must be loaded in ckan.plugins)
 ckan.views.default_views = image_view text_view
-
-# recline_view
 
 # Custom metatadata converters for package_converter(no init params)
 package_converter.converters = ckanext.package_converter.model.scheming_converter.Datacite43SchemingConverter
@@ -128,22 +145,12 @@ ckan.spatial.srid = 4326
 
 ckanext.spatial.common_map.type = custom
 ckanext.spatial.common_map.custom.url = https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png
-ckanext.spatial.common_map.attribution = &copy; EnviDat 2018 (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>); Map data: &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)
-
+ckanext.spatial.common_map.attribution = &copy; EnviDat 2020 (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>); Map data: &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)
 
 ## Scheming + repeating Extension config
 #   module-path:file to schemas being used
-#scheming.dataset_schemas = ckanext.envidat_schema:datacite_dataset.json
-#scheming.organization_schemas = ckanext.envidat_schema:hierarchy_org.json
-
 scheming.dataset_schemas = ckanext.envidat_theme:datacite_dataset.json
 scheming.organization_schemas = ckanext.envidat_theme:hierarchy_org.json
-
-#                      ckanext.spatialx:spatialxy_schema.json
-#   will try to load "spatialx_schema.json" and "spatialxy_schema.json"
-#   as dataset schemas
-#   URLs may also be used, e.g:
-# scheming.dataset_schemas = http://example.com/spatialx_schema.json
 
 #   Preset files may be included as well. The default preset setting is:
 scheming.presets = ckanext.scheming:presets.json
@@ -156,79 +163,98 @@ scheming.presets = ckanext.scheming:presets.json
 scheming.dataset_fallback = false
 
 # Restricted
-ckan.recaptcha.version = 2
-ckan.recaptcha.privatekey = FILL_UP
-ckan.recaptcha.publickey = FILL_UP
+# *help* uncomment the next lines for any host reachable outside VPN
+# ckan.recaptcha.version = 2
+# ckan.recaptcha.privatekey = FILL_UP
+# ckan.recaptcha.publickey = FILL_UP
 
 # oai_repository settings
-oaipmh_repository.id_prefix = oai:envidat.ch:
-oaipmh_repository.site_id = EnviDat
+# *help* these values will define the record identifiers and server information
+#        for the OAI-PHM repository
+#        example (production)
+#            oaipmh_repository.id_prefix = oai:envidat.ch:
+#            oaipmh_repository.site_id = EnviDat
+#        example (development)
+#            oaipmh_repository.id_prefix = oai:envidat01.ch:
+#            oaipmh_repository.site_id = envidat01
+oaipmh_repository.id_prefix = FILL_UP
+oaipmh_repository.site_id = FILL_UP
+# alternatively for development can be oaipmh_repository.id_field = name
 oaipmh_repository.id_field = id
-oaipmh_repository.max = 100
+oaipmh_repository.max = 50
+
+# Set to False in production and True in development
 oaipmh_repository.validate = False
 oaipmh_repository.deleted_record = transient
 
-# datacite_publishing settings
+# datacite_publishing settings (EnviDat prefix is 10.16904)
 datacite_publication.minter = ckanext.datacite_publication.doi_db_index.DataciteIndexDOI
 datacite_publication.doi_prefix = 10.16904
+# *help* parameters for the minting and publication of dois
+#        example (production-like)
+#            datacite_publication.sqlalchemy.url = postgresql://ckan_default:mypassword@envidat01.wsl.ch/envidat_doi
+#            datacite_publication.site_id = envidat01
+#            datacite_publication.url_prefix = https://www.envidat.ch/#/metadata/
+#            datacite_publication.custom_prefix = 10.16904
+#        example (development Mac/Windows)
+#            datacite_publication.sqlalchemy.url = postgresql://ckan_default:ckan@host.docker.internal/envidat_doi
+#            datacite_publication.site_id = localhost
+#            datacite_publication.custom_prefix = 10.12345 10.33333 10.44444
 datacite_publication.sqlalchemy.url = FILL_UP
-datacite_publication.site_id = envidat03
-datacite_publication.custom_prefix = 10.16904
-datacite_publication.datacite_url = https://api.datacite.org/dois
+datacite_publication.site_id = FILL_UP
+datacite_publication.custom_prefix = FILL_UP
+datacite_publication.url_prefix = FILL_UP
+
+# *help* these DOI publication parameters are critical and should be provided by datacite
+datacite_publication.datacite_url = FILL_UP
 datacite_publication.account_name = FILL_UP
 datacite_publication.account_password = FILL_UP
-datacite_publication.url_prefix = https://www.envidat.ch/#/metadata/
 
 ## Front-End Settings
-ckan.site_title = EnviDat
+# *help* information abot the CKAN instance
+#        example (production-like)
+#           ckan.site_title = EnviDat
+#           ckan.site_description =
+#        example (development)
+#           ckan.site_title = EnviDat01
+#           ckan.site_description = Envidat01 development instance
+ckan.site_title = FILL_UP
+ckan.site_description = FILL_UP
+
 ckan.site_logo = envidat-logo-banner-new.png
-ckan.site_description =
 ckan.favicon = envidat-logo-icon-new.ico
 ckan.gravatar_default = identicon
 ckan.preview.direct = png jpg gif
 ckan.preview.loadable = html htm rdf+xml owl+xml xml n3 n-triples turtle plain atom csv tsv rss txt json
-
 ckan.display_timezone = server
 
-# package_hide_extras = for_search_index_only
-#package_edit_return_url = http://another.frontend/dataset/<NAME>
-#package_new_return_url = http://another.frontend/dataset/<NAME>
-#licenses_group_url = http://licenses.opendefinition.org/licenses/groups/ckan.json
-licenses_group_url = http://envidat03.wsl.ch/envidat_license.json
-# ckan.template_footer_end =
-ckan.featured_orgs = wsl slf
+# *help* information abot the CKAN instance
+#        example (production-like)
+#           licenses_group_url = http://envidat03.wsl.ch/envidat_license.json
+#           ckan.featured_orgs = wsl slf
+#        example (development)
+#           licenses_group_url = http://envidat01.wsl.ch:5000/envidat_license.json
+#           ckan.featured_orgs = myorg
+#        ckan default:
+#           licenses_group_url = http://licenses.opendefinition.org/licenses/groups/ckan.json
+licenses_group_url = FILL_UP
+ckan.featured_orgs = FILL UP
 
 
 ## Internationalisation Settings
 ckan.locale_default = en
-# ckan.locale_order = en pt_BR ja it cs_CZ ca es fr el sv sr sr@latin no sk fi ru de pl nl bg ko_KR hu sa sl lv
 ckan.locales_offered = en
-ckan.locales_filtered_out = en_GB
 
 ## Feeds Settings
-
 ckan.feeds.authority_name =
 ckan.feeds.date =
 ckan.feeds.author_name =
 ckan.feeds.author_link =
 
 ## Storage Settings
-ckan.storage_path = /data/ckan/default
+ckan.storage_path = /var/lib/ckan
 ckan.max_resource_size = 10000
 ckan.max_image_size = 20
-
-## Datapusher settings
-
-# Make sure you have set up the DataStore
-
-#ckan.datapusher.formats = csv xls xlsx tsv application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-#ckan.datapusher.url = http://127.0.0.1:8800/
-
-# Resource Proxy settings
-# Preview size limit, default: 1MB
-#ckan.resource_proxy.max_file_size = 1048576
-# Size of chunks to read/write.
-#ckan.resource_proxy.chunk_size = 4096
 
 ## Activity Streams Settings
 #ckan.activity_streams_enabled = true
@@ -238,10 +264,27 @@ ckan.max_image_size = 20
 ckan.hide_activity_from_users = %(ckan.site_id)s
 
 ## Email settings
+# *help* information abot the CKAN instance
+#        example (using a wsl mail account)
+#           email_to = USERNAME@wsl.ch
+#           error_email_from = USERNAME@wsl.ch
+#           smtp.server = WSL_NOTES_URL
+#           smtp.starttls = False
+#           smtp.mail_from = USERNAME@wsl.ch
+#        example (gmail for development)
+#           email_to = mail@domain
+#           error_email_from = ckan-localhost@example.com
+#           smtp.server = smtp.gmail.com:587
+#           smtp.starttls = True
+#           smtp.user = USERNAME@gmail.com
+#           smtp.password = PASSWORD
+#           smtp.mail_from = USERNAME@gmail.com
 email_to = FILL_UP
 error_email_from = FILL_UP
 smtp.server = FILL_UP
-smtp.starttls = False
+smtp.starttls = FILL_UP
+smtp.user = FILL_UP
+smtp.password = FILL_UP
 smtp.mail_from = FILL_UP
 
 ## Logging configuration
