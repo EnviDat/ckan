@@ -308,7 +308,7 @@ qualname = ckan
 propagate = 0
 
 [logger_ckanext]
-level = WARNING
+level = DEBUG
 handlers = console
 qualname = ckanext
 propagate = 0
