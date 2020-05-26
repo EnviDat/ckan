@@ -15,6 +15,8 @@ import meta
 import core
 import domain_object
 
+import logging
+
 __all__ = ['system_info_revision_table', 'system_info_table', 'SystemInfo',
            'SystemInfoRevision', 'get_system_info', 'set_system_info']
 
@@ -28,6 +30,7 @@ system_info_table = Table(
 vdm.sqlalchemy.make_table_stateful(system_info_table)
 system_info_revision_table = core.make_revisioned_table(system_info_table)
 
+log = logging.getLogger(__name__)
 
 class SystemInfo(vdm.sqlalchemy.RevisionedObjectMixin,
                  vdm.sqlalchemy.StatefulObjectMixin,
@@ -54,15 +57,21 @@ SystemInfoRevision = vdm.sqlalchemy.create_object_version(meta.mapper,
 
 def get_system_info(key, default=None):
     ''' get data from system_info table '''
-    from sqlalchemy.exc import ProgrammingError
+    from sqlalchemy.exc import ProgrammingError, InvalidRequestError
     from psycopg2 import OperationalError
     try:
         obj = meta.Session.query(SystemInfo).filter_by(key=key).first()
         if obj:
             return obj.value
-    except ProgrammingError:
+    except (ProgrammingError, InvalidRequestError), e:
+        log.warn("Catched sqlalchemy exception, rolling back: {0}".format(e))
         meta.Session.rollback()
-    except OperationalError:
+    except OperationalError, e:
+        log.warn("Catched psycopg2 exception, rolling back: {0}".format(e))
+        print("\n ** CATCHED OP ERROR **")
+        meta.Session.rollback()
+    except Exception, e:
+        log.error("Catched unexpected exception, rolling back: {0}".format(e))
         meta.Session.rollback()
     return default
 
