@@ -128,6 +128,7 @@ ckan.plugins = datacite_publication
 ckan.views.default_views = image_view text_view
 
 # Custom metatadata converters for package_converter(no init params)
+package_converter.thumbnail = envidat_thumbnail.png
 package_converter.converters = ckanext.package_converter.model.scheming_converter.Datacite43SchemingConverter
                                ckanext.package_converter.model.scheming_resource_converter.Datacite43SchemingResourceConverter
                                ckanext.package_converter.custom.custom_converter.CustomConverter
