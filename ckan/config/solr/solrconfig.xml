@@ -1034,11 +1034,11 @@
   <requestHandler name="/mlt" class="solr.MoreLikeThisHandler">
       <lst name="defaults">
           <bool name="mlt.boost">true</bool>
-          <str name="mlt.fl">title,tags,notes,res_description,res_name,organization,groups</str>
+          <str name="mlt.fl">title,tags,mlt_notes,organization,groups,mlt_authors</str>
           <str name="mlt.interestingTerms">list</str>
           <int name="mlt.maxdf">300</int>
           <int name="mlt.minwl">3</int>
-          <str name="mlt.qf">title^0.4 notes^0.3 tags^0.2 res_description^0.05 res_name^0.05 organization^0.04 groups^0.01</str>
+          <str name="mlt.qf">title^0.7 mlt_notes^0.2 tags^0.1 organization^0.01 groups^0.01 mlt_authors^0.01</str>
   		  <int name="mlt.mindf">1</int>
           <int name="mlt.mintf">1</int>
       </lst>
