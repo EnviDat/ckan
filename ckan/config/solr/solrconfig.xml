@@ -1039,6 +1039,8 @@
           <int name="mlt.maxdf">300</int>
           <int name="mlt.minwl">3</int>
           <str name="mlt.qf">title^0.4 notes^0.3 tags^0.2 res_description^0.05 res_name^0.05 organization^0.04 groups^0.01</str>
+  		  <int name="mlt.mindf">1</int>
+          <int name="mlt.mintf">1</int>
       </lst>
   </requestHandler>
   <!-- Spell Check
