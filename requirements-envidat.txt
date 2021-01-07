@@ -36,7 +36,7 @@ ipaddress==1.0.22
 itsdangerous==0.24
 Jinja2==2.8
 linecache2==1.0.0
-lxml==4.2.5
+lxml==4.6.2
 Mako==1.0.7
 Markdown==2.6.7
 MarkupSafe==1.0
